@@ -1,0 +1,28 @@
+[tool.poetry]
+name = "streaming-service"
+version = "0.1.0"
+description = "Spark Structured Streaming service for Bronze/Silver/Gold processing"
+authors = ["Your Name <your.email@example.com>"]
+readme = "README.md"
+packages = [{include = "src"}]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+pyspark = "^3.5.0"
+delta-spark = "^3.2.0"
+pyyaml = "^6.0"
+
+# Internal dependencies
+common = {path = "../../packages/common", develop = true}
+schemas = {path = "../../packages/schemas", develop = true}
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4.3"
+pytest-cov = "^4.1.0"
+black = "^23.12.0"
+ruff = "^0.1.9"
+mypy = "^1.7.1"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
