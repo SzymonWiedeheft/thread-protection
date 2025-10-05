@@ -27,12 +27,12 @@ install-dev: ## Install all with development dependencies
 # Testing
 test: ## Run tests for all services and packages
 	@echo "Testing packages..."
-	cd packages/common && poetry run pytest
-	cd packages/schemas && poetry run pytest
-	cd packages/monitoring && poetry run pytest
+	cd packages/common && poetry run pytest || [ $$? -eq 5 ]
+	cd packages/schemas && poetry run pytest || [ $$? -eq 5 ]
+	cd packages/monitoring && poetry run pytest || [ $$? -eq 5 ]
 	@echo "Testing services..."
-	cd services/ingestion && poetry run pytest
-	cd services/streaming && poetry run pytest
+	cd services/ingestion && poetry run pytest || [ $$? -eq 5 ]
+	cd services/streaming && poetry run pytest || [ $$? -eq 5 ]
 
 test-integration: ## Run integration tests
 	@echo "Running integration tests..."

@@ -3,6 +3,7 @@
   <component name="ProjectModuleManager">
     <modules>
       <module fileurl="file://$PROJECT_DIR$/services/ingestion/.idea/ingestion.iml" filepath="$PROJECT_DIR$/services/ingestion/.idea/ingestion.iml" />
+      <module fileurl="file://$PROJECT_DIR$/packages/schemas/.idea/schemas.iml" filepath="$PROJECT_DIR$/packages/schemas/.idea/schemas.iml" />
       <module fileurl="file://$PROJECT_DIR$/.idea/thread-protection.iml" filepath="$PROJECT_DIR$/.idea/thread-protection.iml" />
     </modules>
   </component>

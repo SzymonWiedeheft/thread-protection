@@ -3,7 +3,7 @@
 import re
 import structlog
 from typing import List
-from datetime import datetime
+from datetime import datetime, UTC
 from schemas import DomainModel, is_valid_domain
 from common import ParseError
 from .base_parser import BaseParser
@@ -82,7 +82,7 @@ class HostsParser(BaseParser):
                         source=self.source_name,
                         source_format=self.source_format,
                         raw_entry=line,
-                        ingestion_timestamp=datetime.utcnow(),
+                        ingestion_timestamp=datetime.now(UTC),
                         metadata={
                             "line_number": line_number,
                             **(metadata or {}),

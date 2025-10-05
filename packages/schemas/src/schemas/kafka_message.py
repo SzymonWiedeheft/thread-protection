@@ -1,9 +1,8 @@
 """Kafka message schema."""
 
-import json
 from datetime import datetime
-from typing import Optional, Dict, Any
-from pydantic import BaseModel, Field
+from typing import Dict, Any
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class KafkaMessageSchema(BaseModel):
@@ -14,9 +13,7 @@ class KafkaMessageSchema(BaseModel):
     source: str = Field(..., description="Source name")
     source_format: str = Field(..., description="Format: hosts or adblock")
     raw_entry: str = Field(..., description="Original raw entry")
-    ingestion_timestamp: str = Field(
-        ..., description="ISO timestamp of ingestion"
-    )
+    ingestion_timestamp: str = Field(..., description="ISO timestamp of ingestion")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Metadata")
 
     def to_json(self) -> str:
@@ -38,8 +35,8 @@ class KafkaMessageSchema(BaseModel):
             metadata=domain_model.metadata or {},
         )
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "domain": "malicious-site.com",
                 "category": "malware",
@@ -53,3 +50,4 @@ class KafkaMessageSchema(BaseModel):
                 },
             }
         }
+    )

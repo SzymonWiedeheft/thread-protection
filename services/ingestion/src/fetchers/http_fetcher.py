@@ -1,9 +1,14 @@
 """HTTP fetcher with retry logic."""
 
-import asyncio
 import aiohttp
 import structlog
 from typing import Dict, Any
+from tenacity import (
+    AsyncRetrying,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+)
 from common import FetchError
 from .base_fetcher import BaseFetcher
 
@@ -55,66 +60,53 @@ class HTTPFetcher(BaseFetcher):
             timeout=self.timeout,
         )
 
-        attempt = 0
-        current_backoff = self.backoff
+        try:
+            async for attempt in AsyncRetrying(
+                stop=stop_after_attempt(self.retries),
+                wait=wait_exponential(multiplier=self.backoff, min=self.backoff),
+                retry=retry_if_exception_type(
+                    (aiohttp.ClientError, aiohttp.ServerTimeoutError)
+                ),
+                reraise=True,
+            ):
+                with attempt:
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(
+                            self.url,
+                            timeout=aiohttp.ClientTimeout(total=self.timeout),
+                        ) as response:
+                            response.raise_for_status()
+                            content = await response.text()
 
-        while attempt < self.retries:
-            try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(
-                        self.url,
-                        timeout=aiohttp.ClientTimeout(total=self.timeout),
-                    ) as response:
-                        response.raise_for_status()
-                        content = await response.text()
+                            metadata = {
+                                "http_status": response.status,
+                                "content_length": len(content),
+                                "content_type": response.headers.get(
+                                    "Content-Type", ""
+                                ),
+                                "source_url": self.url,
+                            }
 
-                        metadata = {
-                            "http_status": response.status,
-                            "content_length": len(content),
-                            "content_type": response.headers.get("Content-Type", ""),
-                            "source_url": self.url,
-                        }
+                            logger.info(
+                                "HTTP fetch successful",
+                                source=self.source_name,
+                                status=response.status,
+                                content_length=len(content),
+                            )
 
-                        logger.info(
-                            "HTTP fetch successful",
-                            source=self.source_name,
-                            status=response.status,
-                            content_length=len(content),
-                        )
+                            return {
+                                "content": content,
+                                "metadata": metadata,
+                            }
 
-                        return {
-                            "content": content,
-                            "metadata": metadata,
-                        }
-
-            except (aiohttp.ClientError, aiohttp.ServerTimeoutError, Exception) as e:
-                attempt += 1
-
-                if attempt >= self.retries:
-                    logger.error(
-                        "HTTP fetch failed after all retries",
-                        source=self.source_name,
-                        url=self.url,
-                        attempts=attempt,
-                        error=str(e),
-                    )
-                    raise FetchError(
-                        f"Failed to fetch from {self.url} after {attempt} attempts: {str(e)}"
-                    ) from e
-
-                logger.warning(
-                    "HTTP fetch failed, retrying",
-                    source=self.source_name,
-                    url=self.url,
-                    attempt=attempt,
-                    max_retries=self.retries,
-                    backoff_seconds=current_backoff,
-                    error=str(e),
-                )
-
-                # Exponential backoff
-                await asyncio.sleep(current_backoff)
-                current_backoff *= 2
-
-        # Shouldn't reach here, but for type safety
-        raise FetchError(f"Failed to fetch from {self.url}")
+        except (aiohttp.ClientError, aiohttp.ServerTimeoutError) as e:
+            logger.error(
+                "HTTP fetch failed after all retries",
+                source=self.source_name,
+                url=self.url,
+                attempts=self.retries,
+                error=str(e),
+            )
+            raise FetchError(
+                f"Failed to fetch from {self.url} after {self.retries} attempts: {str(e)}"
+            ) from e

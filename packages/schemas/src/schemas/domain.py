@@ -1,8 +1,8 @@
 """Domain data model."""
 
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class DomainModel(BaseModel):
@@ -14,7 +14,7 @@ class DomainModel(BaseModel):
     source_format: str = Field(..., description="Format: hosts or adblock")
     raw_entry: str = Field(..., description="Original raw entry from source")
     ingestion_timestamp: datetime = Field(
-        default_factory=datetime.utcnow,
+        default_factory=lambda: datetime.now(UTC),
         description="Timestamp when data was ingested",
     )
     metadata: Optional[dict] = Field(
@@ -22,8 +22,8 @@ class DomainModel(BaseModel):
         description="Additional metadata (line_number, file_size, etc.)",
     )
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "domain": "malicious-site.com",
                 "category": "malware",
@@ -38,3 +38,4 @@ class DomainModel(BaseModel):
                 },
             }
         }
+    )

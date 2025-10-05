@@ -1,7 +1,6 @@
 # Nord Security - Harmful Domain Data Pipeline
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/)
 [![Spark 3.5](https://img.shields.io/badge/spark-3.5-orange.svg)](https://spark.apache.org/)
 [![Monorepo](https://img.shields.io/badge/monorepo-structure-blue.svg)](https://monorepo.tools/)
 
@@ -37,10 +36,9 @@ nord-security-pipeline/
 ## 🚀 Quick Start
 
 ### Prerequisites
-- Docker Desktop (20.10+) with 16GB RAM
-- Python 3.11+
+- Docker Desktop (20.10+) 
+- Python 3.12+
 - Make (optional)
-- 50GB free disk space
 
 ### Installation
 
@@ -83,9 +81,7 @@ make test-ingestion    # Test ingestion service
 ```
 HTTP Sources → Ingestion Service → Kafka →
 Spark Streaming (Bronze → Silver → Gold) →
-Delta Lake → Trino (Query Engine)
-
-Total Latency: ~60 seconds
+Delta Lake → Trino 
 ```
 
 ## 🔧 Services
@@ -105,7 +101,7 @@ Total Latency: ~60 seconds
 - Airflow DAGs for scheduling
 - Monitoring workflows
 
-## 📦 Packages
+## Packages
 
 ### Common (`packages/common/`)
 - Shared utilities
@@ -122,7 +118,7 @@ Total Latency: ~60 seconds
 - Health checks
 - Alerting
 
-## 📖 Documentation
+## Documentation
 
 - [Architecture](docs/architecture/overview.md)
 - [Setup Guide](docs/operations/setup.md)
@@ -130,7 +126,7 @@ Total Latency: ~60 seconds
 
 See [docs/task_def/nord_readme_full.md](docs/task_def/nord_readme_full.md) for complete documentation.
 
-## 🧪 Testing
+## Testing
 
 ```bash
 # Run all tests
@@ -143,13 +139,3 @@ make test-integration
 make test-ingestion
 make test-streaming
 ```
-
-## 📝 License
-
-MIT License - See LICENSE file for details
-
----
-
-**Last Updated:** October 2025
-**Version:** 1.0.0
-**Architecture:** Monorepo

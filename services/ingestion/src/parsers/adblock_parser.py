@@ -3,7 +3,7 @@
 import re
 import structlog
 from typing import List
-from datetime import datetime
+from datetime import datetime, UTC
 from schemas import DomainModel, is_valid_domain
 from common import ParseError
 from .base_parser import BaseParser
@@ -32,9 +32,7 @@ class AdBlockParser(BaseParser):
         super().__init__(source_name, category, "adblock")
         # Regex to match adblock domain-based rules
         # Format: ||domain.com^ or ||domain.com^$modifiers
-        self.adblock_pattern = re.compile(
-            r"^\|\|([a-zA-Z0-9\.-]+)\^(?:\$.*)?$"
-        )
+        self.adblock_pattern = re.compile(r"^\|\|([a-zA-Z0-9\.-]+)\^(?:\$.*)?$")
 
     def parse(self, content: str, metadata: dict = None) -> List[DomainModel]:
         """
@@ -67,7 +65,12 @@ class AdBlockParser(BaseParser):
             line = line.strip()
 
             # Skip empty lines and comments (! or #)
-            if not line or line.startswith("!") or line.startswith("#") or line.startswith("["):
+            if (
+                not line
+                or line.startswith("!")
+                or line.startswith("#")
+                or line.startswith("[")
+            ):
                 continue
 
             # Match adblock pattern
@@ -83,7 +86,7 @@ class AdBlockParser(BaseParser):
                         source=self.source_name,
                         source_format=self.source_format,
                         raw_entry=line,
-                        ingestion_timestamp=datetime.utcnow(),
+                        ingestion_timestamp=datetime.now(UTC),
                         metadata={
                             "line_number": line_number,
                             **(metadata or {}),
