@@ -108,5 +108,12 @@ class HTTPFetcher(BaseFetcher):
                 error=str(e),
             )
             raise FetchError(
-                f"Failed to fetch from {self.url} after {self.retries} attempts: {str(e)}"
-            ) from e
+                message=f"Failed to fetch from {self.url} after {self.retries} attempts",
+                context={
+                    "source_name": self.source_name,
+                    "url": self.url,
+                    "attempts": self.retries,
+                    "timeout": self.timeout,
+                },
+                original_error=e,
+            )

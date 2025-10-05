@@ -1,0 +1,88 @@
+[tool.poetry]
+name = "thread-protection-integration-tests"
+version = "0.1.0"
+description = "Integration tests for Thread Protection project"
+authors = ["Thread Protection Team"]
+readme = "README.md"
+package-mode = false
+
+[tool.poetry.dependencies]
+python = ">=3.12,<3.13"
+
+# Core testing dependencies
+pytest = "^8.0.0"
+pytest-asyncio = "^0.23.0"
+pytest-timeout = "^2.2.0"
+pytest-cov = "^5.0.0"
+pytest-mock = "^3.14.0"
+
+# Docker/Infrastructure testing
+testcontainers = "^4.0.0"
+docker = "^7.0.0"
+
+# Kafka testing
+kafka-python = "^2.0.2"
+
+# HTTP testing
+aiohttp = "^3.9.0"
+aioresponses = "^0.7.6"
+
+# Internal service dependencies (for integration tests)
+ingestion-service = {path = "../services/ingestion", develop = true}
+streaming-service = {path = "../services/streaming", develop = true}
+common = {path = "../packages/common", develop = true}
+schemas = {path = "../packages/schemas", develop = true}
+monitoring = {path = "../packages/monitoring", develop = true}
+
+[tool.poetry.group.dev.dependencies]
+black = "^24.0.0"
+ruff = "^0.3.0"
+mypy = "^1.9.0"
+
+[tool.pytest.ini_options]
+# Pytest configuration
+testpaths = ["."]
+python_files = "test_*.py"
+python_classes = "Test*"
+python_functions = "test_*"
+
+# Markers
+markers = [
+    "integration: Integration tests (require Docker containers)",
+    "performance: Performance benchmarks",
+    "slow: Slow-running tests (> 5 seconds)",
+    "kafka: Tests requiring Kafka",
+    "spark: Tests requiring Spark",
+]
+
+# Async mode
+asyncio_mode = "auto"
+
+# Output options
+addopts = [
+    "-v",
+    "--tb=short",
+    "--strict-markers",
+    "--color=yes",
+    "--code-highlight=yes",
+    "--capture=no",
+]
+
+# Warnings
+filterwarnings = [
+    "error",
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+    "ignore::ResourceWarning",
+    "ignore::pytest.PytestUnraisableExceptionWarning",
+]
+
+# Logging
+log_cli = true
+log_cli_level = "INFO"
+log_cli_format = "%(asctime)s [%(levelname)8s] %(message)s"
+log_cli_date_format = "%Y-%m-%d %H:%M:%S"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

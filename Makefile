@@ -15,17 +15,16 @@ install: ## Install all packages and services
 	@echo "Installing services..."
 	cd services/ingestion && poetry config virtualenvs.in-project true --local && poetry install
 	cd services/streaming && poetry config virtualenvs.in-project true --local && poetry install
+	cd services/orchestration && poetry config virtualenvs.in-project true --local && poetry install
 
-install-dev: ## Install all with development dependencies
-	@echo "Installing packages in dev mode..."
-	cd packages/common && poetry install
-	cd packages/schemas && poetry install
-	cd packages/monitoring && poetry install
-	cd services/ingestion && poetry install
-	cd services/streaming && poetry install
+install-tests: ## Install integration test dependencies
+	@echo "Installing integration test dependencies..."
+	cd tests && poetry config virtualenvs.in-project true --local && poetry install
 
 # Testing
-test: ## Run tests for all services and packages
+test: test-all ## Run all tests (alias for test-all)
+
+test-unit: ## Run unit tests for all services and packages
 	@echo "Testing packages..."
 	cd packages/common && poetry run pytest || [ $$? -eq 5 ]
 	cd packages/schemas && poetry run pytest || [ $$? -eq 5 ]
@@ -33,10 +32,25 @@ test: ## Run tests for all services and packages
 	@echo "Testing services..."
 	cd services/ingestion && poetry run pytest || [ $$? -eq 5 ]
 	cd services/streaming && poetry run pytest || [ $$? -eq 5 ]
+	cd services/orchestration && poetry run pytest || [ $$? -eq 5 ]
 
-test-integration: ## Run integration tests
+test-integration: ## Run integration tests only (marked with @integration)
 	@echo "Running integration tests..."
-	cd tests/integration && pytest -v
+	cd tests && poetry run pytest -v -m integration
+
+test-integration-all: ## Run all integration tests (including slow)
+	@echo "Running all integration tests..."
+	cd tests && poetry run pytest integration -v
+
+test-performance: ## Run performance tests
+	@echo "Running performance tests..."
+	cd tests && poetry run pytest -v -m performance
+
+test-all: test-unit test-integration ## Run all tests (unit + integration)
+
+test-coverage: ## Run all tests with coverage reporting
+	@echo "Running tests with coverage..."
+	cd tests && poetry run pytest -v --cov=../services --cov=../packages --cov-report=html --cov-report=term-missing
 
 # Code Quality
 lint: ## Run linting for all code
@@ -47,6 +61,8 @@ lint: ## Run linting for all code
 	@echo "Linting services..."
 	cd services/ingestion && poetry run ruff check src/
 	cd services/streaming && poetry run ruff check src/
+	@echo "Linting integration tests..."
+	cd tests && poetry run ruff check .
 
 format: ## Format all code
 	@echo "Formatting packages..."
@@ -56,6 +72,8 @@ format: ## Format all code
 	@echo "Formatting services..."
 	cd services/ingestion && poetry run black src/ tests/
 	cd services/streaming && poetry run black src/ tests/
+	@echo "Formatting integration tests..."
+	cd tests && poetry run black .
 
 # Cleanup
 clean: ## Clean build artifacts

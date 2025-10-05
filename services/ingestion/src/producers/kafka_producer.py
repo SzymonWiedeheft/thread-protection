@@ -69,7 +69,11 @@ class KafkaProducer:
             logger.info("Kafka producer connected successfully")
         except Exception as e:
             logger.error("Failed to connect to Kafka", error=str(e))
-            raise KafkaPublishError(f"Failed to connect to Kafka: {str(e)}") from e
+            raise KafkaPublishError(
+                message="Failed to connect to Kafka",
+                context={"bootstrap_servers": self.bootstrap_servers},
+                original_error=e,
+            )
 
     def close(self):
         """Close Kafka producer connection."""
@@ -116,7 +120,8 @@ class KafkaProducer:
         """
         if not self.producer:
             raise KafkaPublishError(
-                "Kafka producer not connected. Call connect() first."
+                message="Kafka producer not connected. Call connect() first.",
+                context={"bootstrap_servers": self.bootstrap_servers},
             )
 
         if not domains:
@@ -165,7 +170,14 @@ class KafkaProducer:
             self.producer.flush()
         except Exception as e:
             logger.error("Failed to flush Kafka producer", error=str(e))
-            raise KafkaPublishError(f"Failed to flush messages: {str(e)}") from e
+            raise KafkaPublishError(
+                message="Failed to flush messages to Kafka",
+                context={
+                    "bootstrap_servers": self.bootstrap_servers,
+                    "attempted_count": len(domains),
+                },
+                original_error=e,
+            )
 
         if failed:
             logger.warning(
@@ -198,7 +210,8 @@ class KafkaProducer:
         """
         if not self.producer:
             raise KafkaPublishError(
-                "Kafka producer not connected. Call connect() first."
+                message="Kafka producer not connected. Call connect() first.",
+                context={"bootstrap_servers": self.bootstrap_servers},
             )
 
         overall_stats = {"malware": 0, "ads_trackers": 0, "total": 0}

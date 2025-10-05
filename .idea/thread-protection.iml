@@ -9,6 +9,7 @@
     <orderEntry type="sourceFolder" forTests="false" />
     <orderEntry type="module" module-name="ingestion" />
     <orderEntry type="module" module-name="schemas" />
+    <orderEntry type="module" module-name="orchestration" />
   </component>
   <component name="PyDocumentationSettings">
     <option name="format" value="PLAIN" />

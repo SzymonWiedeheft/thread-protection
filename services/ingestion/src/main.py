@@ -7,7 +7,13 @@ from pathlib import Path
 from typing import Dict, List, Any
 import yaml
 import structlog
-from common import setup_logging, get_env, PipelineException
+from common import (
+    setup_logging,
+    get_env,
+    PipelineException,
+    ConfigurationError,
+    constants,
+)
 from schemas import DomainModel
 from fetchers import HTTPFetcher
 from parsers import HostsParser, AdBlockParser
@@ -53,7 +59,10 @@ class IngestionService:
         config_file = Path(self.config_path)
 
         if not config_file.exists():
-            raise FileNotFoundError(f"Configuration file not found: {self.config_path}")
+            raise ConfigurationError(
+                message="Configuration file not found",
+                context={"config_path": self.config_path},
+            )
 
         logger.info("Loading configuration", config_path=self.config_path)
 
@@ -96,9 +105,15 @@ class IngestionService:
             fetcher = HTTPFetcher(
                 source_name=source_name,
                 url=source_config["url"],
-                timeout=int(get_env("HTTP_TIMEOUT", "30")),
-                retries=int(get_env("HTTP_RETRIES", "3")),
-                backoff=float(get_env("HTTP_BACKOFF", "5.0")),
+                timeout=int(
+                    get_env("HTTP_TIMEOUT", str(constants.DEFAULT_HTTP_TIMEOUT))
+                ),
+                retries=int(
+                    get_env("HTTP_RETRIES", str(constants.DEFAULT_HTTP_RETRIES))
+                ),
+                backoff=float(
+                    get_env("HTTP_BACKOFF", str(constants.DEFAULT_HTTP_BACKOFF))
+                ),
             )
 
             # Fetch data
@@ -250,9 +265,15 @@ class IngestionService:
         # Create Kafka producer with context manager
         with KafkaProducer(
             bootstrap_servers=self.kafka_bootstrap_servers,
-            batch_size=int(get_env("KAFKA_BATCH_SIZE", "1000")),
-            linger_ms=int(get_env("KAFKA_LINGER_MS", "100")),
-            max_retries=int(get_env("KAFKA_MAX_RETRIES", "3")),
+            batch_size=int(
+                get_env("KAFKA_BATCH_SIZE", str(constants.DEFAULT_KAFKA_BATCH_SIZE))
+            ),
+            linger_ms=int(
+                get_env("KAFKA_LINGER_MS", str(constants.DEFAULT_KAFKA_LINGER_MS))
+            ),
+            max_retries=int(
+                get_env("KAFKA_MAX_RETRIES", str(constants.DEFAULT_KAFKA_MAX_RETRIES))
+            ),
         ) as producer:
             # Publish batch
             stats = producer.publish_batch(domains_by_source)
@@ -314,7 +335,11 @@ class IngestionService:
                 error=str(e),
                 error_type=type(e).__name__,
             )
-            raise PipelineException(f"Pipeline execution failed: {str(e)}") from e
+            raise PipelineException(
+                message="Pipeline execution failed",
+                context=self.stats,
+                original_error=e,
+            )
 
 
 def main():
@@ -326,8 +351,8 @@ def main():
     parser.add_argument(
         "--config",
         type=str,
-        default="src/config/sources.yaml",
-        help="Path to sources configuration file (default: src/config/sources.yaml)",
+        default=constants.DEFAULT_CONFIG_PATH,
+        help=f"Path to sources configuration file (default: {constants.DEFAULT_CONFIG_PATH})",
     )
     parser.add_argument(
         "--kafka-servers",
@@ -338,9 +363,9 @@ def main():
     parser.add_argument(
         "--log-level",
         type=str,
-        default="INFO",
+        default=constants.DEFAULT_LOG_LEVEL,
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
-        help="Logging level (default: INFO)",
+        help=f"Logging level (default: {constants.DEFAULT_LOG_LEVEL})",
     )
     parser.add_argument(
         "--json-logs",
@@ -360,7 +385,7 @@ def main():
 
     # Get Kafka bootstrap servers
     kafka_servers = args.kafka_servers or get_env(
-        "KAFKA_BOOTSTRAP_SERVERS", "kafka:9092"
+        "KAFKA_BOOTSTRAP_SERVERS", constants.DEFAULT_KAFKA_SERVERS
     )
 
     logger.info(

@@ -50,7 +50,13 @@ class HostsParser(BaseParser):
             ParseError: If parsing fails
         """
         if not content:
-            raise ParseError(f"Empty content from source {self.source_name}")
+            raise ParseError(
+                message="Empty content received from source",
+                context={
+                    "source_name": self.source_name,
+                    "format": self.source_format,
+                },
+            )
 
         logger.info(
             "Parsing hosts file",

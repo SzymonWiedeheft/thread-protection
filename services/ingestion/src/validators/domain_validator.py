@@ -67,7 +67,11 @@ class DomainValidator:
 
                 if self.strict:
                     raise ValidationError(
-                        f"Invalid domain format: {domain_model.domain}"
+                        message="Invalid domain format",
+                        context={
+                            "domain": domain_model.domain,
+                            "source": domain_model.source,
+                        },
                     )
                 continue
 

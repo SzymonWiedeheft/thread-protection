@@ -3,5 +3,5 @@
   <component name="Black">
     <option name="sdkName" value="Poetry (thread-protection)" />
   </component>
-  <component name="ProjectRootManager" version="2" project-jdk-name="Poetry (thread-protection)" project-jdk-type="Python SDK" />
+  <component name="ProjectRootManager" version="2" project-jdk-name="Poetry (orchestration)" project-jdk-type="Python SDK" />
 </project>
