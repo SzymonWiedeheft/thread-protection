@@ -115,9 +115,12 @@ status: ## Check service status
 logs: ## Show logs from all services
 	@cd infrastructure/docker && docker-compose logs -f
 
+setup-airflow: ## Setup Airflow variables
+	@scripts/setup-airflow-vars.sh
+
 # Docker Build
 build-ingestion: ## Build ingestion service image
-	@cd services/ingestion && docker build -t thread-protection-ingestion .
+	@docker build -f services/ingestion/Dockerfile -t thread-protection-ingestion .
 
 build-streaming: ## Build streaming service image
 	@cd services/streaming && docker build -t thread-protection-streaming .

@@ -22,7 +22,7 @@ class IngestionOperator(BaseOperator):
     Executes the ingestion service using Docker or subprocess.
     """
 
-    template_fields = ["source_name", "config_path"]
+    template_fields = ["source_name", "config_path", "kafka_servers"]
     ui_color = "#80D0FF"
 
     @apply_defaults
@@ -116,42 +116,59 @@ class IngestionOperator(BaseOperator):
             raise AirflowException("Ingestion timed out after 600 seconds")
 
     def _execute_docker(self) -> Dict[str, Any]:
-        """Execute ingestion in Docker container."""
-        import docker
-
-        client = docker.from_env()
-
-        cmd = [
+        """Execute ingestion in Docker container using CLI."""
+        # Build docker run command
+        docker_cmd = [
+            "docker",
+            "run",
+            "--rm",
+            "--network",
+            "pipeline-network",
+            "-e",
+            f"KAFKA_BOOTSTRAP_SERVERS={self.kafka_servers}",
+            self.docker_image,
             "python",
-            "src/main.py",
+            "-m",
+            "src.main",
             "--config",
-            "src/config/sources.yaml",
+            self.config_path,
             "--kafka-servers",
             self.kafka_servers,
             "--json-logs",
         ]
 
-        logger.info("Running Docker container", image=self.docker_image, cmd=cmd)
+        logger.info("Running Docker container via CLI", cmd=" ".join(docker_cmd))
 
         try:
-            container = client.containers.run(
-                self.docker_image,
-                command=cmd,
-                environment={
-                    "KAFKA_BOOTSTRAP_SERVERS": self.kafka_servers,
-                },
-                network_mode="host",
-                remove=True,
-                detach=False,
+            result = subprocess.run(
+                docker_cmd,
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=600,  # 10 minute timeout
             )
 
-            logger.info("Docker container completed", output=container.decode())
+            logger.info("Docker container completed", stdout=result.stdout)
 
-            return {"status": "success", "output": container.decode()}
+            return {
+                "status": "success",
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+            }
 
-        except docker.errors.ContainerError as e:
-            logger.error("Docker container failed", error=str(e))
-            raise AirflowException(f"Docker execution failed: {str(e)}")
+        except subprocess.CalledProcessError as e:
+            logger.error(
+                "Docker execution failed",
+                returncode=e.returncode,
+                stdout=e.stdout,
+                stderr=e.stderr,
+            )
+            raise AirflowException(
+                f"Docker execution failed with code {e.returncode}: {e.stderr}"
+            )
+
+        except subprocess.TimeoutExpired:
+            raise AirflowException("Docker execution timed out after 600 seconds")
 
 
 class KafkaHealthCheckOperator(BaseOperator):
@@ -161,6 +178,7 @@ class KafkaHealthCheckOperator(BaseOperator):
     Verifies connectivity to Kafka brokers and topic availability.
     """
 
+    template_fields = ["kafka_servers", "topics"]
     ui_color = "#FFD700"
 
     @apply_defaults
@@ -231,6 +249,7 @@ class DataFreshnessCheckOperator(BaseOperator):
     Verifies that data has been updated recently.
     """
 
+    template_fields = ["delta_path"]
     ui_color = "#90EE90"
 
     @apply_defaults
@@ -281,6 +300,7 @@ class SparkJobCheckOperator(BaseOperator):
     Monitors streaming query status and progress.
     """
 
+    template_fields = ["spark_master", "job_name"]
     ui_color = "#FFA500"
 
     @apply_defaults

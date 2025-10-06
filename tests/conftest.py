@@ -50,6 +50,16 @@ from fixtures.sample_data import (
     sample_validation_stats,
 )
 
+from fixtures.streaming_fixtures import (
+    temp_delta_paths,
+    spark_session_with_delta,
+    sample_kafka_messages,
+    sample_malformed_kafka_messages,
+    sample_bronze_data,
+    sample_silver_data,
+    kafka_publish_helper,
+)
+
 __all__ = [
     # Utilities
     "is_docker_available",
@@ -94,4 +104,12 @@ __all__ = [
     "sample_http_responses",
     "sample_kafka_config",
     "sample_validation_stats",
+    # Streaming fixtures
+    "temp_delta_paths",
+    "spark_session_with_delta",
+    "sample_kafka_messages",
+    "sample_malformed_kafka_messages",
+    "sample_bronze_data",
+    "sample_silver_data",
+    "kafka_publish_helper",
 ]

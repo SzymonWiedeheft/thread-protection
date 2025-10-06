@@ -9,7 +9,7 @@ from common.exceptions import (
     KafkaPublishError,
     ConfigurationError,
 )
-from common.utils import retry_with_backoff, get_env
+from common.utils import get_env
 from common import constants
 
 __all__ = [
@@ -20,7 +20,6 @@ __all__ = [
     "ValidationError",
     "KafkaPublishError",
     "ConfigurationError",
-    "retry_with_backoff",
     "get_env",
     "constants",
 ]

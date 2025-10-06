@@ -44,9 +44,10 @@ check_kafka = KafkaHealthCheckOperator(
 
 run_ingestion = IngestionOperator(
     task_id="run_full_ingestion",
-    config_path="/opt/ingestion/src/config/sources.yaml",
+    config_path="src/config/sources.yaml",
     kafka_servers="{{ var.value.kafka_servers }}",
-    execution_mode="subprocess",
+    execution_mode="docker",
+    docker_image="thread-protection-ingestion:latest",
     dag=dag,
 )
 

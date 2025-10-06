@@ -10,6 +10,7 @@
     <orderEntry type="module" module-name="ingestion" />
     <orderEntry type="module" module-name="schemas" />
     <orderEntry type="module" module-name="orchestration" />
+    <orderEntry type="module" module-name="streaming" />
   </component>
   <component name="PyDocumentationSettings">
     <option name="format" value="PLAIN" />

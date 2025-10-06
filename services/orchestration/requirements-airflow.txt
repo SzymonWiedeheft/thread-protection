@@ -1,0 +1,3 @@
+# Airflow runtime dependencies for custom operators
+kafka-python==2.0.2
+structlog==24.1.0

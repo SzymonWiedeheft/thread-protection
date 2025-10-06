@@ -66,11 +66,13 @@ with TaskGroup("infrastructure_health", dag=dag) as infrastructure_health:
         task_id="check_kafka",
         kafka_servers="{{ var.value.kafka_servers }}",
         topics=["malware_domains", "ads_trackers_domains"],
+        dag=dag,
     )
 
     check_spark = SparkJobCheckOperator(
         task_id="check_spark",
         spark_master="{{ var.value.spark_master }}",
+        dag=dag,
     )
 
 
@@ -81,18 +83,21 @@ with TaskGroup("data_quality", dag=dag) as data_quality:
         task_id="check_bronze_freshness",
         delta_path="{{ var.value.bronze_path }}",
         max_age_minutes=30,
+        dag=dag,
     )
 
     check_silver_freshness = DataFreshnessCheckOperator(
         task_id="check_silver_freshness",
         delta_path="{{ var.value.silver_path }}",
         max_age_minutes=60,
+        dag=dag,
     )
 
     check_gold_freshness = DataFreshnessCheckOperator(
         task_id="check_gold_freshness",
         delta_path="{{ var.value.gold_path }}",
         max_age_minutes=120,
+        dag=dag,
     )
 
 
