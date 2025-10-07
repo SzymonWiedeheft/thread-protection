@@ -1,0 +1,41 @@
+[tool.poetry]
+name = "ingestion-service"
+version = "0.1.0"
+description = "HTTP data fetching and Kafka producer service"
+authors = ["Szymon Wiedeheft"]
+readme = "README.md"
+packages = [
+    {include = "fetchers", from = "src"},
+    {include = "parsers", from = "src"},
+    {include = "producers", from = "src"},
+    {include = "validators", from = "src"},
+    {include = "config", from = "src"},
+]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+aiohttp = "^3.9.0"
+kafka-python = "^2.0.2"
+pyyaml = "^6.0"
+pydantic = "^2.5.0"
+pydantic-settings = "^2.1.0"
+tenacity = "^8.2.0"
+
+# Internal dependencies
+common = {path = "../../packages/common", develop = true}
+schemas = {path = "../../packages/schemas", develop = true}
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4.3"
+pytest-asyncio = "^0.21.1"
+pytest-cov = "^4.1.0"
+black = "^23.12.0"
+ruff = "^0.1.9"
+mypy = "^1.7.1"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

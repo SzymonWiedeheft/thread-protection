@@ -1,0 +1,110 @@
+"""AdBlock filter format parser."""
+
+import re
+import structlog
+from typing import List
+from datetime import datetime, UTC
+from schemas import DomainModel, is_valid_domain
+from common import ParseError
+from .base_parser import BaseParser
+
+logger = structlog.get_logger()
+
+
+class AdBlockParser(BaseParser):
+    """Parser for AdBlock filter format.
+
+    Example format:
+        ||malicious-site.com^
+        ||tracker.example.com^$third-party
+        ! Comment line
+        # Comment line
+    """
+
+    def __init__(self, source_name: str, category: str):
+        """
+        Initialize AdBlock parser.
+
+        Args:
+            source_name: Name of the data source
+            category: Category (malware or ads_trackers)
+        """
+        super().__init__(source_name, category, "adblock")
+        # Regex to match adblock domain-based rules
+        # Format: ||domain.com^ or ||domain.com^$modifiers
+        self.adblock_pattern = re.compile(r"^\|\|([a-zA-Z0-9\.-]+)\^(?:\$.*)?$")
+
+    def parse(self, content: str, metadata: dict = None) -> List[DomainModel]:
+        """
+        Parse AdBlock filter content.
+
+        Args:
+            content: Raw AdBlock filter content
+            metadata: Optional metadata from fetcher
+
+        Returns:
+            List of DomainModel objects
+
+        Raises:
+            ParseError: If parsing fails
+        """
+        if not content:
+            raise ParseError(
+                message="Empty content received from source",
+                context={
+                    "source_name": self.source_name,
+                    "format": self.source_format,
+                },
+            )
+
+        logger.info(
+            "Parsing AdBlock filter",
+            source=self.source_name,
+            content_length=len(content),
+        )
+
+        domains = []
+        lines = content.splitlines()
+
+        for line_number, line in enumerate(lines, start=1):
+            # Strip whitespace
+            line = line.strip()
+
+            # Skip empty lines and comments (! or #)
+            if (
+                not line
+                or line.startswith("!")
+                or line.startswith("#")
+                or line.startswith("[")
+            ):
+                continue
+
+            # Match adblock pattern
+            match = self.adblock_pattern.match(line)
+            if match:
+                domain = match.group(1).lower().strip()
+
+                # Validate domain
+                if is_valid_domain(domain):
+                    domain_model = DomainModel(
+                        domain=domain,
+                        category=self.category,
+                        source=self.source_name,
+                        source_format=self.source_format,
+                        raw_entry=line,
+                        ingestion_timestamp=datetime.now(UTC),
+                        metadata={
+                            "line_number": line_number,
+                            **(metadata or {}),
+                        },
+                    )
+                    domains.append(domain_model)
+
+        logger.info(
+            "AdBlock filter parsing complete",
+            source=self.source_name,
+            total_lines=len(lines),
+            domains_extracted=len(domains),
+        )
+
+        return domains

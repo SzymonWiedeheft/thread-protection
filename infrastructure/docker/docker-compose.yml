@@ -1,0 +1,453 @@
+version: '3.8'
+
+services:
+  # ============ Message Queue ============
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    volumes:
+      - zookeeper-data:/var/lib/zookeeper/data
+      - zookeeper-logs:/var/lib/zookeeper/log
+    networks:
+      - pipeline-network
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+      - "9093:9093"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+      KAFKA_LOG_RETENTION_HOURS: 168
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    networks:
+      - pipeline-network
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+
+  # ============ Spark ============
+  spark-master:
+    image: spark:3.5.6-scala2.12-java11-python3-ubuntu
+    container_name: spark-master
+    environment:
+      - SPARK_NO_DAEMONIZE=true
+      - SPARK_METRICS_CONF=/opt/spark/conf/metrics.properties
+      - SPARK_MASTER_OPTS=-Dspark.metrics.conf=/opt/spark/conf/metrics.properties
+    ports:
+      - "8080:8080"  # Spark Master Web UI
+      - "7077:7077"  # Spark Master
+    volumes:
+      - ./../../data:/data
+      - ./../../services/streaming:/opt/streaming
+      - ./configs/spark/metrics.properties:/opt/spark/conf/metrics.properties
+    networks:
+      - pipeline-network
+    command: ["/bin/bash", "-c", "/opt/spark/sbin/start-master.sh --host spark-master --port 7077 --webui-port 8080"]
+
+  spark-worker:
+    image: thread-protection-streaming:latest
+    container_name: spark-worker
+    depends_on:
+      - spark-master
+    user: root
+    environment:
+      - SPARK_NO_DAEMONIZE=true
+      - SPARK_WORKER_MEMORY=4G
+      - SPARK_WORKER_CORES=2
+      - PYSPARK_PYTHON=/usr/local/bin/python3.11
+      - SPARK_METRICS_CONF=/opt/spark/conf/metrics.properties
+      - SPARK_WORKER_OPTS=-Dspark.metrics.conf=/opt/spark/conf/metrics.properties
+    volumes:
+      - ./../../data:/data
+      - ./../../services/streaming:/opt/streaming
+      - ./configs/spark/metrics.properties:/opt/spark/conf/metrics.properties
+    networks:
+      - pipeline-network
+    entrypoint: ["/bin/bash"]
+    command: ["-c", "/opt/spark/sbin/start-worker.sh spark://spark-master:7077"]
+
+  spark-worker-trino:
+    image: thread-protection-streaming:latest
+    container_name: spark-worker-trino
+    depends_on:
+      - spark-master
+    user: root
+    environment:
+      - SPARK_NO_DAEMONIZE=true
+      - SPARK_WORKER_MEMORY=2G
+      - SPARK_WORKER_CORES=1
+      - PYSPARK_PYTHON=/usr/local/bin/python3.11
+      - SPARK_METRICS_CONF=/opt/spark/conf/metrics.properties
+      - SPARK_WORKER_OPTS=-Dspark.metrics.conf=/opt/spark/conf/metrics.properties
+    volumes:
+      - ./../../data:/data
+      - ./configs/spark/metrics.properties:/opt/spark/conf/metrics.properties
+    networks:
+      - pipeline-network
+    entrypoint: ["/bin/bash"]
+    command: ["-c", "/opt/spark/sbin/start-worker.sh spark://spark-master:7077"]
+
+  # ============ Streaming Jobs ============
+  bronze-stream:
+    image: thread-protection-streaming:latest
+    container_name: bronze-stream
+    depends_on:
+      - kafka
+      - spark-master
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - KAFKA_TOPICS=domains.malware,domains.phishing,domains.ads
+      - DELTA_BASE_PATH=/data/delta
+      - CHECKPOINT_BASE_PATH=/data/checkpoints
+      - SPARK_MASTER=spark://spark-master:7077
+    volumes:
+      - ./../../data:/data
+      - ./../../services/streaming/src:/app/services/streaming/src
+    networks:
+      - pipeline-network
+    command:
+      [
+        "--stream-type", "bronze",
+        "--master", "spark://spark-master:7077",
+        "--starting-offsets", "earliest"
+      ]
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+          cpus: '1.5'
+
+  silver-stream:
+    image: thread-protection-streaming:latest
+    container_name: silver-stream
+    depends_on:
+      - bronze-stream
+    environment:
+      - DELTA_BASE_PATH=/data/delta
+      - CHECKPOINT_BASE_PATH=/data/checkpoints
+      - SPARK_MASTER=spark://spark-master:7077
+    volumes:
+      - ./../../data:/data
+      - ./../../services/streaming/src:/app/services/streaming/src
+    networks:
+      - pipeline-network
+    command:
+      [
+        "--stream-type", "silver",
+        "--master", "spark://spark-master:7077"
+      ]
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1.5g
+          cpus: '1'
+
+  gold-stream:
+    image: thread-protection-streaming:latest
+    container_name: gold-stream
+    depends_on:
+      - silver-stream
+    environment:
+      - DELTA_BASE_PATH=/data/delta
+      - CHECKPOINT_BASE_PATH=/data/checkpoints
+      - SPARK_MASTER=spark://spark-master:7077
+    volumes:
+      - ./../../data:/data
+      - ./../../services/streaming/src:/app/services/streaming/src
+    networks:
+      - pipeline-network
+    command:
+      [
+        "--stream-type", "gold",
+        "--master", "spark://spark-master:7077"
+      ]
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+          cpus: '1'
+
+  # ============ Query Engine ============
+  postgres-metastore:
+    image: postgres:15
+    container_name: postgres-metastore
+    environment:
+      POSTGRES_USER: hive
+      POSTGRES_PASSWORD: hive
+      POSTGRES_DB: metastore
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres-metastore-data:/var/lib/postgresql/data
+    networks:
+      - pipeline-network
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "hive"]
+      interval: 5s
+      retries: 5
+
+  hive-metastore:
+    image: apache/hive:3.1.3
+    container_name: hive-metastore
+    platform: linux/amd64
+    user: root
+    depends_on:
+      postgres-metastore:
+        condition: service_healthy
+    ports:
+      - "9083:9083"
+    volumes:
+      - ./../../data:/data
+      - ./configs/hive/init-metastore.sh:/opt/hive/init-metastore.sh
+    environment:
+      DB_DRIVER: postgres
+      SERVICE_NAME: metastore
+    entrypoint: ["/bin/bash"]
+    command: ["/opt/hive/init-metastore.sh"]
+    networks:
+      - pipeline-network
+
+  trino:
+    image: trinodb/trino:428
+    container_name: trino
+    ports:
+      - "8081:8080"  # Trino Web UI
+    volumes:
+      - ./configs/trino/catalog:/etc/trino/catalog
+      - ./../../data:/data
+    networks:
+      - pipeline-network
+    depends_on:
+      - hive-metastore
+      - kafka
+
+  # ============ Workflow Orchestration ============
+  postgres:
+    image: postgres:15
+    container_name: postgres-airflow
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - pipeline-network
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      retries: 5
+
+  airflow-init:
+    image: apache/airflow:2.7.1-python3.11
+    container_name: airflow-init
+    depends_on:
+      - postgres
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
+      - AIRFLOW__CORE__FERNET_KEY=
+      - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=True
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - AIRFLOW__API__AUTH_BACKENDS=airflow.api.auth.backend.basic_auth
+      - AIRFLOW_UID=0
+      - AIRFLOW_GID=0
+      - _AIRFLOW_DB_UPGRADE=True
+      - _AIRFLOW_WWW_USER_CREATE=True
+      - _AIRFLOW_WWW_USER_USERNAME=admin
+      - _AIRFLOW_WWW_USER_PASSWORD=admin
+      - PYTHONPATH=/opt/packages/monitoring/src:$PYTHONPATH
+    volumes:
+      - ./../../services/orchestration/dags:/opt/airflow/dags
+      - ./../../services/orchestration/plugins:/opt/airflow/plugins
+      - ./../../services/orchestration/requirements-airflow.txt:/requirements.txt
+      - ./../../services/ingestion:/opt/ingestion
+      - ./../../packages/common/src:/opt/packages/common
+      - ./../../packages/schemas/src:/opt/packages/schemas
+      - ./../../packages/monitoring:/opt/packages/monitoring
+      - airflow-logs:/opt/airflow/logs
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        pip install --no-cache-dir -r /requirements.txt
+        pip install --no-cache-dir -e /opt/packages/monitoring
+        airflow db init
+        airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com || true
+    networks:
+      - pipeline-network
+
+  airflow-webserver:
+    image: apache/airflow:2.7.1-python3.11
+    container_name: airflow-webserver
+    privileged: true
+    depends_on:
+      - postgres
+      - airflow-init
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
+      - AIRFLOW__CORE__FERNET_KEY=
+      - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=True
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - AIRFLOW__API__AUTH_BACKENDS=airflow.api.auth.backend.basic_auth
+      - PROMETHEUS_PUSHGATEWAY_URL=http://prometheus-pushgateway:9091
+      - MONITORING_ENVIRONMENT=development
+      - PYTHONPATH=/opt/packages/monitoring/src:$PYTHONPATH
+    ports:
+      - "8082:8080"  # Airflow Web UI
+    volumes:
+      - ./../../services/orchestration/dags:/opt/airflow/dags
+      - ./../../services/orchestration/plugins:/opt/airflow/plugins
+      - ./../../services/orchestration/requirements-airflow.txt:/requirements.txt
+      - ./../../services/ingestion:/opt/ingestion
+      - ./../../packages/common/src:/opt/packages/common
+      - ./../../packages/schemas/src:/opt/packages/schemas
+      - ./../../packages/monitoring:/opt/packages/monitoring
+      - airflow-logs:/opt/airflow/logs
+      - /var/run/docker.sock:/var/run/docker.sock
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        apt-get update && apt-get install -y docker.io sudo || true
+        chmod 666 /var/run/docker.sock 2>/dev/null || true
+        pip install --no-cache-dir -r /requirements.txt
+        pip install --no-cache-dir -e /opt/packages/monitoring
+        airflow webserver
+    networks:
+      - pipeline-network
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+
+  airflow-scheduler:
+    image: apache/airflow:2.7.1-python3.11
+    container_name: airflow-scheduler
+    privileged: true
+    depends_on:
+      - postgres
+      - airflow-init
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
+      - AIRFLOW__CORE__FERNET_KEY=
+      - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=True
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - AIRFLOW_UID=0
+      - AIRFLOW_GID=0
+      - PROMETHEUS_PUSHGATEWAY_URL=http://prometheus-pushgateway:9091
+      - MONITORING_ENVIRONMENT=development
+      - PYTHONPATH=/opt/packages/monitoring/src:$PYTHONPATH
+    volumes:
+      - ./../../services/orchestration/dags:/opt/airflow/dags
+      - ./../../services/orchestration/plugins:/opt/airflow/plugins
+      - ./../../services/orchestration/requirements-airflow.txt:/requirements.txt
+      - ./../../services/ingestion:/opt/ingestion
+      - ./../../packages/common/src:/opt/packages/common
+      - ./../../packages/schemas/src:/opt/packages/schemas
+      - ./../../packages/monitoring:/opt/packages/monitoring
+      - airflow-logs:/opt/airflow/logs
+      - /var/run/docker.sock:/var/run/docker.sock
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        apt-get update && apt-get install -y docker.io sudo || true
+        usermod -aG docker airflow || true
+        chmod 666 /var/run/docker.sock 2>/dev/null || true
+        pip install --no-cache-dir -r /requirements.txt
+        pip install --no-cache-dir -e /opt/packages/monitoring
+        airflow scheduler
+    networks:
+      - pipeline-network
+
+  # ============ Monitoring ============
+  prometheus:
+    image: prom/prometheus:v2.47.0
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./configs/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    networks:
+      - pipeline-network
+
+  grafana:
+    image: grafana/grafana:10.1.0
+    container_name: grafana
+    depends_on:
+      - prometheus
+      - prometheus-pushgateway
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_INSTALL_PLUGINS=
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./configs/grafana/provisioning:/etc/grafana/provisioning
+      - ./configs/grafana/dashboards:/var/lib/grafana/dashboards
+    networks:
+      - pipeline-network
+
+  prometheus-pushgateway:
+    image: prom/pushgateway:v1.6.0
+    container_name: prometheus-pushgateway
+    ports:
+      - "9091:9091"
+    networks:
+      - pipeline-network
+
+networks:
+  pipeline-network:
+    driver: bridge
+    name: pipeline-network
+
+volumes:
+  zookeeper-data:
+  zookeeper-logs:
+  kafka-data:
+  postgres-data:
+  airflow-logs:
+  prometheus-data:
+  grafana-data:
+  postgres-metastore-data:

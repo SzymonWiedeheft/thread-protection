@@ -1,0 +1,68 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'local-dev'
+    environment: 'development'
+
+# Alertmanager configuration (optional for development)
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+
+# Rule files (optional for development)
+rule_files:
+  # - "alerts/*.yml"
+
+# Scrape configurations
+scrape_configs:
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+        labels:
+          service: 'prometheus'
+
+  # Kafka metrics (if JMX exporter is configured)
+  - job_name: 'kafka'
+    static_configs:
+      - targets: ['kafka:9092']
+        labels:
+          service: 'kafka'
+
+  # Spark metrics (if configured)
+  - job_name: 'spark-master'
+    metrics_path: '/metrics/master/prometheus'
+    static_configs:
+      - targets: ['spark-master:8080']
+        labels:
+          service: 'spark-master'
+
+  - job_name: 'spark-worker'
+    metrics_path: '/metrics/worker/prometheus'
+    static_configs:
+      - targets: ['spark-worker:8081']
+        labels:
+          service: 'spark-worker'
+
+  - job_name: 'pushgateway'
+    honor_labels: true
+    static_configs:
+      - targets: ['prometheus-pushgateway:9091']
+        labels:
+          service: 'pushgateway'
+
+  # Airflow metrics (if StatsD/Prometheus exporter is configured)
+  - job_name: 'airflow'
+    static_configs:
+      - targets: ['airflow-webserver:8080']
+        labels:
+          service: 'airflow'
+
+  # Custom application metrics
+  - job_name: 'ingestion-service'
+    static_configs:
+      - targets: ['ingestion:8000']
+        labels:
+          service: 'ingestion'
