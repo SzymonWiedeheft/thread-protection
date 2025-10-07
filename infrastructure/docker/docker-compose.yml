@@ -53,12 +53,15 @@ services:
     container_name: spark-master
     environment:
       - SPARK_NO_DAEMONIZE=true
+      - SPARK_METRICS_CONF=/opt/spark/conf/metrics.properties
+      - SPARK_MASTER_OPTS=-Dspark.metrics.conf=/opt/spark/conf/metrics.properties
     ports:
       - "8080:8080"  # Spark Master Web UI
       - "7077:7077"  # Spark Master
     volumes:
       - ./../../data:/data
       - ./../../services/streaming:/opt/streaming
+      - ./configs/spark/metrics.properties:/opt/spark/conf/metrics.properties
     networks:
       - pipeline-network
     command: ["/bin/bash", "-c", "/opt/spark/sbin/start-master.sh --host spark-master --port 7077 --webui-port 8080"]
@@ -74,9 +77,12 @@ services:
       - SPARK_WORKER_MEMORY=4G
       - SPARK_WORKER_CORES=2
       - PYSPARK_PYTHON=/usr/local/bin/python3.11
+      - SPARK_METRICS_CONF=/opt/spark/conf/metrics.properties
+      - SPARK_WORKER_OPTS=-Dspark.metrics.conf=/opt/spark/conf/metrics.properties
     volumes:
       - ./../../data:/data
       - ./../../services/streaming:/opt/streaming
+      - ./configs/spark/metrics.properties:/opt/spark/conf/metrics.properties
     networks:
       - pipeline-network
     entrypoint: ["/bin/bash"]
@@ -93,8 +99,11 @@ services:
       - SPARK_WORKER_MEMORY=2G
       - SPARK_WORKER_CORES=1
       - PYSPARK_PYTHON=/usr/local/bin/python3.11
+      - SPARK_METRICS_CONF=/opt/spark/conf/metrics.properties
+      - SPARK_WORKER_OPTS=-Dspark.metrics.conf=/opt/spark/conf/metrics.properties
     volumes:
       - ./../../data:/data
+      - ./configs/spark/metrics.properties:/opt/spark/conf/metrics.properties
     networks:
       - pipeline-network
     entrypoint: ["/bin/bash"]
@@ -274,6 +283,7 @@ services:
       - _AIRFLOW_WWW_USER_CREATE=True
       - _AIRFLOW_WWW_USER_USERNAME=admin
       - _AIRFLOW_WWW_USER_PASSWORD=admin
+      - PYTHONPATH=/opt/packages/monitoring/src:$PYTHONPATH
     volumes:
       - ./../../services/orchestration/dags:/opt/airflow/dags
       - ./../../services/orchestration/plugins:/opt/airflow/plugins
@@ -281,12 +291,14 @@ services:
       - ./../../services/ingestion:/opt/ingestion
       - ./../../packages/common/src:/opt/packages/common
       - ./../../packages/schemas/src:/opt/packages/schemas
+      - ./../../packages/monitoring:/opt/packages/monitoring
       - airflow-logs:/opt/airflow/logs
     entrypoint: /bin/bash
     command:
       - -c
       - |
         pip install --no-cache-dir -r /requirements.txt
+        pip install --no-cache-dir -e /opt/packages/monitoring
         airflow db init
         airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com || true
     networks:
@@ -306,6 +318,9 @@ services:
       - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=True
       - AIRFLOW__CORE__LOAD_EXAMPLES=False
       - AIRFLOW__API__AUTH_BACKENDS=airflow.api.auth.backend.basic_auth
+      - PROMETHEUS_PUSHGATEWAY_URL=http://prometheus-pushgateway:9091
+      - MONITORING_ENVIRONMENT=development
+      - PYTHONPATH=/opt/packages/monitoring/src:$PYTHONPATH
     ports:
       - "8082:8080"  # Airflow Web UI
     volumes:
@@ -315,6 +330,7 @@ services:
       - ./../../services/ingestion:/opt/ingestion
       - ./../../packages/common/src:/opt/packages/common
       - ./../../packages/schemas/src:/opt/packages/schemas
+      - ./../../packages/monitoring:/opt/packages/monitoring
       - airflow-logs:/opt/airflow/logs
       - /var/run/docker.sock:/var/run/docker.sock
     entrypoint: /bin/bash
@@ -324,6 +340,7 @@ services:
         apt-get update && apt-get install -y docker.io sudo || true
         chmod 666 /var/run/docker.sock 2>/dev/null || true
         pip install --no-cache-dir -r /requirements.txt
+        pip install --no-cache-dir -e /opt/packages/monitoring
         airflow webserver
     networks:
       - pipeline-network
@@ -349,6 +366,9 @@ services:
       - DOCKER_HOST=unix:///var/run/docker.sock
       - AIRFLOW_UID=0
       - AIRFLOW_GID=0
+      - PROMETHEUS_PUSHGATEWAY_URL=http://prometheus-pushgateway:9091
+      - MONITORING_ENVIRONMENT=development
+      - PYTHONPATH=/opt/packages/monitoring/src:$PYTHONPATH
     volumes:
       - ./../../services/orchestration/dags:/opt/airflow/dags
       - ./../../services/orchestration/plugins:/opt/airflow/plugins
@@ -356,6 +376,7 @@ services:
       - ./../../services/ingestion:/opt/ingestion
       - ./../../packages/common/src:/opt/packages/common
       - ./../../packages/schemas/src:/opt/packages/schemas
+      - ./../../packages/monitoring:/opt/packages/monitoring
       - airflow-logs:/opt/airflow/logs
       - /var/run/docker.sock:/var/run/docker.sock
     entrypoint: /bin/bash
@@ -366,6 +387,7 @@ services:
         usermod -aG docker airflow || true
         chmod 666 /var/run/docker.sock 2>/dev/null || true
         pip install --no-cache-dir -r /requirements.txt
+        pip install --no-cache-dir -e /opt/packages/monitoring
         airflow scheduler
     networks:
       - pipeline-network
@@ -393,6 +415,7 @@ services:
     container_name: grafana
     depends_on:
       - prometheus
+      - prometheus-pushgateway
     ports:
       - "3000:3000"
     environment:
@@ -403,6 +426,14 @@ services:
       - grafana-data:/var/lib/grafana
       - ./configs/grafana/provisioning:/etc/grafana/provisioning
       - ./configs/grafana/dashboards:/var/lib/grafana/dashboards
+    networks:
+      - pipeline-network
+
+  prometheus-pushgateway:
+    image: prom/pushgateway:v1.6.0
+    container_name: prometheus-pushgateway
+    ports:
+      - "9091:9091"
     networks:
       - pipeline-network
 

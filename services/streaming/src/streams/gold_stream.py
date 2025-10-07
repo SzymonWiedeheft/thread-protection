@@ -30,7 +30,7 @@ import structlog
 from delta.tables import DeltaTable
 
 from schemas import delta_schemas
-from ..utils.delta_utils import create_delta_table_if_not_exists
+from ..utils.delta_utils import create_delta_table_if_not_exists, register_delta_table
 from ..config.spark_config import (
     get_delta_path,
     get_checkpoint_path,
@@ -182,16 +182,28 @@ class GoldStream:
         """Initialize Gold Delta table if it doesn't exist."""
         logger.info("Initializing Gold Delta table", delta_path=self.gold_path)
 
+        table_properties = {
+            "delta.enableChangeDataFeed": "true",
+            "delta.autoOptimize.optimizeWrite": "true",
+            "delta.autoOptimize.autoCompact": "true",
+        }
+
         create_delta_table_if_not_exists(
             self.spark,
             self.gold_path,
             delta_schemas.GOLD_SCHEMA,
             partition_columns=None,  # Gold is not partitioned (optimized for lookups)
-            table_properties={
-                "delta.enableChangeDataFeed": "true",
-                "delta.autoOptimize.optimizeWrite": "true",
-                "delta.autoOptimize.autoCompact": "true",
-            },
+            table_properties=table_properties,
+        )
+
+        register_delta_table(
+            spark=self.spark,
+            database="gold",
+            table_name="domains",
+            table_path=self.gold_path,
+            schema=delta_schemas.GOLD_SCHEMA,
+            partition_columns=None,
+            table_properties=table_properties,
         )
 
         logger.info("Gold Delta table initialized")
@@ -390,6 +402,9 @@ class GoldStream:
         logger.info("Starting Gold streaming pipeline")
 
         try:
+            # Ensure destination table is ready and registered
+            self.initialize_delta_table()
+
             # Step 1: Read from Silver Delta
             silver_df = self.read_from_silver()
 

@@ -25,7 +25,11 @@ import structlog
 
 from schemas import delta_schemas
 from ..utils.kafka_utils import get_kafka_options, extract_kafka_metadata_expr
-from ..utils.delta_utils import create_delta_table_if_not_exists, write_stream_to_delta
+from ..utils.delta_utils import (
+    create_delta_table_if_not_exists,
+    register_delta_table,
+    write_stream_to_delta,
+)
 from ..config.spark_config import (
     get_kafka_bootstrap_servers,
     get_delta_path,
@@ -188,16 +192,28 @@ class BronzeStream:
         """Initialize Bronze Delta table if it doesn't exist."""
         logger.info("Initializing Bronze Delta table", delta_path=self.delta_path)
 
+        table_properties = {
+            "delta.enableChangeDataFeed": "true",  # Enable CDC for downstream
+            "delta.autoOptimize.optimizeWrite": "true",
+            "delta.autoOptimize.autoCompact": "true",
+        }
+
         create_delta_table_if_not_exists(
             self.spark,
             self.delta_path,
             delta_schemas.BRONZE_SCHEMA,
             partition_columns=["ingestion_date"],
-            table_properties={
-                "delta.enableChangeDataFeed": "true",  # Enable CDC for downstream
-                "delta.autoOptimize.optimizeWrite": "true",
-                "delta.autoOptimize.autoCompact": "true",
-            },
+            table_properties=table_properties,
+        )
+
+        register_delta_table(
+            spark=self.spark,
+            database="bronze",
+            table_name="domains",
+            table_path=self.delta_path,
+            schema=delta_schemas.BRONZE_SCHEMA,
+            partition_columns=["ingestion_date"],
+            table_properties=table_properties,
         )
 
         logger.info("Bronze Delta table initialized")
@@ -219,39 +235,15 @@ class BronzeStream:
             checkpoint=self.checkpoint_path,
         )
 
-        # Configure write with table properties
-        writer = (
-            bronze_df.writeStream.format("delta")
-            .outputMode("append")
-            .option("checkpointLocation", self.checkpoint_path)
-            .partitionBy("ingestion_date")
-            .queryName("bronze_stream")
-            # Delta table properties (applied on table creation)
-            .option("delta.enableChangeDataFeed", "true")
-            .option("delta.autoOptimize.optimizeWrite", "true")
-            .option("delta.autoOptimize.autoCompact", "true")
+        return write_stream_to_delta(
+            bronze_df,
+            self.delta_path,
+            self.checkpoint_path,
+            output_mode="append",
+            partition_by=["ingestion_date"],
+            trigger_interval=self.trigger_interval,
+            query_name="bronze_stream",
         )
-
-        # Parse trigger interval
-        if self.trigger_interval:
-            if "second" in self.trigger_interval.lower():
-                import re
-                seconds = int(re.findall(r"\d+", self.trigger_interval)[0])
-                writer = writer.trigger(processingTime=f"{seconds} seconds")
-            elif "minute" in self.trigger_interval.lower():
-                import re
-                minutes = int(re.findall(r"\d+", self.trigger_interval)[0])
-                writer = writer.trigger(processingTime=f"{minutes} minutes")
-
-        query = writer.start(self.delta_path)
-
-        logger.info(
-            "Bronze stream query started",
-            query_id=query.id,
-            query_name=query.name,
-        )
-
-        return query
 
     def start(self):
         """
@@ -274,6 +266,9 @@ class BronzeStream:
         logger.info("Starting Bronze streaming pipeline")
 
         try:
+            # Ensure target schema/table exists before starting the stream
+            self.initialize_delta_table()
+
             # Step 1: Read from Kafka
             kafka_df = self.read_from_kafka()
 

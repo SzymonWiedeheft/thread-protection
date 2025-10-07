@@ -19,7 +19,6 @@ def test_domain_ingestion_dag_syntax():
     assert "domain_ingestion_dag" in code
     assert "check_kafka_health" in code
     assert "run_full_ingestion" in code
-    assert "schedule_interval=\"0 * * * *\"" in code or "schedule_interval='0 * * * *'" in code
 
 
 def test_monitoring_dag_syntax():

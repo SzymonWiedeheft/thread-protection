@@ -33,16 +33,25 @@ scrape_configs:
 
   # Spark metrics (if configured)
   - job_name: 'spark-master'
+    metrics_path: '/metrics/master/prometheus'
     static_configs:
       - targets: ['spark-master:8080']
         labels:
           service: 'spark-master'
 
   - job_name: 'spark-worker'
+    metrics_path: '/metrics/worker/prometheus'
     static_configs:
       - targets: ['spark-worker:8081']
         labels:
           service: 'spark-worker'
+
+  - job_name: 'pushgateway'
+    honor_labels: true
+    static_configs:
+      - targets: ['prometheus-pushgateway:9091']
+        labels:
+          service: 'pushgateway'
 
   # Airflow metrics (if StatsD/Prometheus exporter is configured)
   - job_name: 'airflow'

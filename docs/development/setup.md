@@ -64,6 +64,30 @@ open http://localhost:3000
 open http://localhost:8080
 ```
 
+## Monitoring
+
+Spark master and worker containers expose Prometheus metrics via `/metrics/*/prometheus` after the stack starts. Prometheus scrapes these endpoints automatically, and Grafana provisions a `Spark Master Overview` dashboard with common health signals (alive workers, registered cores, and worker memory headroom).
+
+After changing Prometheus or Spark configs, restart the Spark containers so they pick up the `metrics.properties` file:
+```bash
+docker compose -f infrastructure/docker/docker-compose.yml restart spark-master spark-worker spark-worker-trino
+```
+
+Then reload Prometheus and verify the new scrape targets are healthy:
+```bash
+curl -X POST http://localhost:9090/-/reload
+open http://localhost:9090/targets
+```
+
+Grafana at `http://localhost:3000` (admin/admin) loads a `Spark Master Overview` dashboard under the `Spark` folder so you can confirm the metrics stream without additional configuration.
+
+The monitoring stack also provisions a Prometheus Pushgateway (`http://localhost:9091`) that the Airflow monitoring DAG uses to publish ingestion health snapshots. Restart `airflow-webserver`, `airflow-scheduler`, and `prometheus-pushgateway` whenever you touch `monitoring_dag.py` metrics code so the updated package is reinstalled:
+```bash
+docker compose -f infrastructure/docker/docker-compose.yml restart airflow-webserver airflow-scheduler prometheus-pushgateway
+```
+
+Look for the `Ingestion Pipeline Health` dashboard in Grafana’s `Spark` folder to visualize the overall pipeline status, component-level health gauges, and the latest failed check counts sourced from the monitoring DAG.
+
 ## Development Workflow
 
 ### Running Tests

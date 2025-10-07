@@ -162,7 +162,13 @@ class TestDeltaUtils:
         mock_delta_table_class.isDeltaTable.assert_called_once_with(
             mock_spark, "/data/delta/test"
         )
-        mock_spark.createDataFrame.assert_called_once_with([], test_schema)
+        mock_spark.createDataFrame.assert_called_once()
+        args, _ = mock_spark.createDataFrame.call_args
+        assert args[0] == []
+        created_schema = args[1]
+        assert isinstance(created_schema, StructType)
+        assert created_schema.simpleString() == test_schema.simpleString()
+        assert all(field.nullable for field in created_schema)
         mock_df.write.format.assert_called_once_with("delta")
         mock_writer.partitionBy.assert_called_once_with("date")
         mock_writer.save.assert_called_once_with("/data/delta/test")

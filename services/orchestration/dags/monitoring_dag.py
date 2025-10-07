@@ -5,6 +5,7 @@ Health check and monitoring workflow for the domain ingestion pipeline.
 Runs every 15 minutes to monitor Kafka, Delta Lake, and Spark jobs.
 """
 
+import os
 from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.operators.python import PythonOperator
@@ -14,6 +15,7 @@ from custom_operators import (
     DataFreshnessCheckOperator,
     SparkJobCheckOperator,
 )
+from monitoring import PrometheusMetrics
 
 
 # Default arguments for all tasks
@@ -109,6 +111,8 @@ def collect_metrics(**context):
     logger = structlog.get_logger()
 
     task_instance = context["task_instance"]
+    dag_run = context.get("dag_run")
+    dag = context.get("dag")
 
     # Pull results from all health checks
     kafka_health = task_instance.xcom_pull(
@@ -125,21 +129,77 @@ def collect_metrics(**context):
     )
     gold_health = task_instance.xcom_pull(task_ids="data_quality.check_gold_freshness")
 
+    def _is_success(result):
+        if isinstance(result, dict):
+            status = result.get("status")
+            if isinstance(status, str):
+                return status.lower() == "success"
+        return bool(result)
+
+    component_statuses = {
+        "kafka": _is_success(kafka_health),
+        "spark": _is_success(spark_health),
+        "bronze": _is_success(bronze_health),
+        "silver": _is_success(silver_health),
+        "gold": _is_success(gold_health),
+    }
+
+    failed_components = [
+        component for component, healthy in component_statuses.items() if not healthy
+    ]
+    all_healthy = not failed_components
+
+    collected_at = datetime.utcnow()
+
     metrics = {
         "kafka": kafka_health,
         "spark": spark_health,
         "bronze": bronze_health,
         "silver": silver_health,
         "gold": gold_health,
-        "timestamp": datetime.utcnow().isoformat(),
+        "summary": {
+            "all_healthy": all_healthy,
+            "failed_components": failed_components,
+        },
+        "timestamp": collected_at.isoformat(),
     }
 
     logger.info("Monitoring metrics collected", metrics=metrics)
 
-    # TODO: Send metrics to Prometheus
-    # from monitoring import PrometheusMetrics
-    # prometheus = PrometheusMetrics()
-    # prometheus.record_gauge("pipeline_health", 1.0 if all_healthy else 0.0)
+    prometheus = PrometheusMetrics(
+        job_name="airflow_monitoring_dag",
+        subsystem="ingestion",
+        default_labels={
+            "environment": os.getenv(
+                "MONITORING_ENVIRONMENT",
+                os.getenv("ENVIRONMENT", "development"),
+            ),
+            "pipeline": "domain_ingestion",
+        },
+    )
+
+    start_date = getattr(task_instance, "start_date", None)
+    duration_seconds = None
+    if start_date:
+        try:
+            start_ts = start_date.timestamp()
+        except AttributeError:
+            start_ts = None
+        if start_ts is None:
+            try:
+                start_ts = datetime.fromisoformat(str(start_date)).timestamp()
+            except ValueError:
+                start_ts = None
+        if start_ts is not None:
+            duration_seconds = max(0.0, collected_at.timestamp() - start_ts)
+
+    prometheus.push_health_snapshot(
+        component_statuses=component_statuses,
+        dag_id=dag.dag_id if dag else "monitoring_dag",
+        execution_ts=collected_at,
+        run_id=dag_run.run_id if dag_run else None,
+        duration_seconds=duration_seconds,
+    )
 
     return metrics
 

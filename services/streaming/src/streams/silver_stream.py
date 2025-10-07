@@ -20,7 +20,11 @@ import structlog
 
 from schemas import delta_schemas
 from schemas.validation_rules import is_valid_domain, clean_domain
-from ..utils.delta_utils import create_delta_table_if_not_exists, write_stream_to_delta
+from ..utils.delta_utils import (
+    create_delta_table_if_not_exists,
+    register_delta_table,
+    write_stream_to_delta,
+)
 from ..config.spark_config import (
     get_delta_path,
     get_checkpoint_path,
@@ -188,16 +192,28 @@ class SilverStream:
         """Initialize Silver Delta table if it doesn't exist."""
         logger.info("Initializing Silver Delta table", delta_path=self.silver_path)
 
+        table_properties = {
+            "delta.enableChangeDataFeed": "true",  # Enable CDC for downstream
+            "delta.autoOptimize.optimizeWrite": "true",
+            "delta.autoOptimize.autoCompact": "true",
+        }
+
         create_delta_table_if_not_exists(
             self.spark,
             self.silver_path,
             delta_schemas.SILVER_SCHEMA,
             partition_columns=["ingestion_date"],
-            table_properties={
-                "delta.enableChangeDataFeed": "true",  # Enable CDC for downstream
-                "delta.autoOptimize.optimizeWrite": "true",
-                "delta.autoOptimize.autoCompact": "true",
-            },
+            table_properties=table_properties,
+        )
+
+        register_delta_table(
+            spark=self.spark,
+            database="silver",
+            table_name="domains",
+            table_path=self.silver_path,
+            schema=delta_schemas.SILVER_SCHEMA,
+            partition_columns=["ingestion_date"],
+            table_properties=table_properties,
         )
 
         logger.info("Silver Delta table initialized")
@@ -258,6 +274,9 @@ class SilverStream:
         logger.info("Starting Silver streaming pipeline")
 
         try:
+            # Ensure destination table is ready and registered
+            self.initialize_delta_table()
+
             # Step 1: Read from Bronze Delta
             bronze_df = self.read_from_bronze()
 

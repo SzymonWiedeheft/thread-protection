@@ -160,7 +160,16 @@ def create_spark_session(
         "org.apache.spark:spark-token-provider-kafka-0-10_2.12:3.5.6",
     ]
 
-    spark = configure_spark_with_delta_pip(builder, extra_packages=extra_packages).getOrCreate()
+    try:
+        spark = configure_spark_with_delta_pip(
+            builder, extra_packages=extra_packages
+        ).getOrCreate()
+    except (TypeError, AttributeError) as exc:
+        logger.warning(
+            "Falling back to default Spark builder; Delta integration unavailable",
+            error=str(exc),
+        )
+        spark = builder.getOrCreate()
 
     # Set log level
     spark.sparkContext.setLogLevel("WARN")

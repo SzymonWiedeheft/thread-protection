@@ -1,8 +1,11 @@
 """Delta Lake utilities for Spark Structured Streaming."""
 
+from pathlib import Path
 from typing import Optional
+
 from pyspark.sql import DataFrame, SparkSession
-from pyspark.sql.types import StructType
+from pyspark.sql.types import StructType, StructField
+from pyspark.sql.utils import AnalysisException
 from delta import DeltaTable
 import structlog
 
@@ -37,11 +40,13 @@ def create_delta_table_if_not_exists(
     if not DeltaTable.isDeltaTable(spark, table_path):
         logger.info("Creating Delta table", table_path=table_path)
 
+        normalized_schema = _with_nullable_fields(schema)
+
         # Create empty DataFrame with schema
-        empty_df = spark.createDataFrame([], schema)
+        empty_df = spark.createDataFrame([], normalized_schema)
 
         # Build writer
-        writer = empty_df.write.format("delta").mode("overwrite")
+        writer = empty_df.write.format("delta")
 
         if partition_columns:
             writer = writer.partitionBy(*partition_columns)
@@ -71,6 +76,152 @@ def create_delta_table_if_not_exists(
             )
     else:
         logger.info("Delta table already exists", table_path=table_path)
+
+
+def _escape_sql_string(value: str) -> str:
+    """Escape single quotes for safe SQL string literals."""
+
+    return value.replace("'", "\\'")
+
+
+def _schema_to_sql_columns(schema: StructType) -> str:
+    """Convert a StructType into SQL column definitions."""
+
+    column_defs = []
+    for field in schema:
+        data_type = field.dataType.simpleString()
+        nullability = " NOT NULL" if not field.nullable else ""
+        column_defs.append(f"{field.name} {data_type}{nullability}")
+
+    return ",\n  ".join(column_defs)
+
+
+def _with_nullable_fields(schema: StructType) -> StructType:
+    """Return a copy of schema with all top-level fields nullable."""
+
+    return StructType(
+        [
+            StructField(field.name, field.dataType, True, field.metadata)
+            for field in schema
+        ]
+    )
+
+
+def register_delta_table(
+    spark: SparkSession,
+    database: str,
+    table_name: str,
+    table_path: str,
+    schema: StructType,
+    partition_columns: Optional[list] = None,
+    table_properties: Optional[dict] = None,
+) -> None:
+    """Register a Delta table with the Spark catalog if needed."""
+
+    full_table_name = f"{database}.{table_name}"
+    table_location = Path(table_path).as_posix()
+    schema_location_path = Path(table_path).parent
+    schema_location = schema_location_path.as_posix()
+    try:
+        schema_location_path.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:  # pragma: no cover - filesystem permissions guard
+        logger.warning(
+            "Unable to ensure schema directory exists",
+            schema=database,
+            path=schema_location,
+            error=str(exc),
+        )
+
+    logger.info(
+        "Ensuring schema exists",
+        schema=database,
+        location=schema_location,
+    )
+    schema_sql = f"CREATE SCHEMA IF NOT EXISTS {database}"
+    if schema_location:
+        schema_sql += f" LOCATION '{_escape_sql_string(schema_location)}'"
+
+    spark.sql(schema_sql)
+
+    table_identifier = f"{database}.{table_name}" if database else table_name
+    try:
+        table_exists_raw = spark.catalog.tableExists(table_identifier)
+    except TypeError:
+        table_exists_raw = spark.catalog.tableExists(database, table_name)
+
+    table_exists = bool(table_exists_raw)
+
+    normalized_schema = _with_nullable_fields(schema)
+
+    if not table_exists:
+        columns_sql = _schema_to_sql_columns(normalized_schema)
+        partition_clause = (
+            f"PARTITIONED BY ({', '.join(partition_columns)})"
+            if partition_columns
+            else ""
+        )
+        properties_clause = ""
+        if table_properties:
+            formatted_props = ", ".join(
+                [f"'{key}'='{value}'" for key, value in table_properties.items()]
+            )
+            properties_clause = f"TBLPROPERTIES ({formatted_props})"
+
+        ddl = f"""
+CREATE TABLE IF NOT EXISTS {full_table_name} (
+  {columns_sql}
+)
+USING DELTA
+{partition_clause}
+LOCATION '{_escape_sql_string(table_location)}'
+{properties_clause}
+"""
+
+        logger.info(
+            "Registering Delta table",
+            table=full_table_name,
+            location=table_location,
+        )
+        spark.sql(ddl)
+    else:
+        try:
+            details = spark.sql(f"DESCRIBE DETAIL {full_table_name}").collect()
+            if isinstance(details, list) and details:
+                first_entry = details[0]
+                if isinstance(first_entry, dict) and "location" in first_entry:
+                    existing_location = Path(first_entry["location"]).as_posix()
+                    if existing_location != table_location:
+                        logger.warning(
+                            "Existing table registered at different location",
+                            table=full_table_name,
+                            existing_location=existing_location,
+                            requested_location=table_location,
+                        )
+                    else:
+                        logger.info(
+                            "Delta table already registered",
+                            table=full_table_name,
+                            location=existing_location,
+                        )
+        except AnalysisException as exc:  # pragma: no cover - defensive
+            logger.warning(
+                "Unable to describe existing Delta table",
+                table=full_table_name,
+                error=str(exc),
+            )
+
+    if table_properties:
+        formatted_props = ", ".join(
+            [f"'{key}'='{value}'" for key, value in table_properties.items()]
+        )
+        logger.info(
+            "Aligning Delta table properties",
+            table=full_table_name,
+            properties=table_properties,
+        )
+        spark.sql(
+            f"ALTER TABLE {full_table_name} SET TBLPROPERTIES ({formatted_props})"
+        )
 
 
 def get_delta_table(spark: SparkSession, table_path: str) -> DeltaTable:

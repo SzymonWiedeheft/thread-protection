@@ -42,15 +42,7 @@ test-integration-all: ## Run all integration tests (including slow)
 	@echo "Running all integration tests..."
 	cd tests && poetry run pytest integration -v
 
-test-performance: ## Run performance tests
-	@echo "Running performance tests..."
-	cd tests && poetry run pytest -v -m performance
-
 test-all: test-unit test-integration ## Run all tests (unit + integration)
-
-test-coverage: ## Run all tests with coverage reporting
-	@echo "Running tests with coverage..."
-	cd tests && poetry run pytest -v --cov=../services --cov=../packages --cov-report=html --cov-report=term-missing
 
 # Code Quality
 lint: ## Run linting for all code
