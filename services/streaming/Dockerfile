@@ -30,7 +30,7 @@ RUN apt-get update && apt-get install -y \
     rm -rf /tmp/Python-3.11.9 /tmp/Python-3.11.9.tgz
 
 # Install Poetry
-ARG POETRY_VERSION=1.8.5
+ARG POETRY_VERSION=2.2.1
 RUN curl -sSL https://install.python-poetry.org | python3 - --version "$POETRY_VERSION" && \
     ln -s /root/.local/bin/poetry /usr/local/bin/poetry
 
@@ -50,14 +50,14 @@ COPY services/streaming /app/services/streaming
 
 # Install dependencies for packages
 WORKDIR /app/packages/common
-RUN --mount=type=cache,target=/root/.cache/pip rm -rf .venv && poetry install --no-dev --no-interaction --no-ansi
+RUN --mount=type=cache,target=/root/.cache/pip rm -rf .venv && poetry install --only main --no-interaction --no-ansi
 
 WORKDIR /app/packages/schemas
-RUN --mount=type=cache,target=/root/.cache/pip rm -rf .venv && poetry install --no-dev --no-interaction --no-ansi
+RUN --mount=type=cache,target=/root/.cache/pip rm -rf .venv && poetry install --only main --no-interaction --no-ansi
 
 # Install streaming service dependencies
 WORKDIR /app/services/streaming
-RUN --mount=type=cache,target=/root/.cache/pip rm -rf .venv && poetry install --no-dev --no-interaction --no-ansi
+RUN --mount=type=cache,target=/root/.cache/pip rm -rf .venv && poetry install --only main --no-interaction --no-ansi
 
 # Use bundled PySpark distribution to ensure driver matches installed library version
 ENV SPARK_HOME=/usr/local/lib/python3.11/site-packages/pyspark \
