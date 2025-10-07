@@ -3,7 +3,7 @@
 import pytest
 import time
 import json
-from datetime import datetime, UTC, timedelta
+from datetime import datetime, UTC
 from pyspark.sql import SparkSession
 from delta.tables import DeltaTable
 
@@ -50,9 +50,13 @@ def test_full_pipeline_ingestion_to_gold(
 
     # Verify Bronze
     assert DeltaTable.isDeltaTable(spark_session_with_delta, temp_delta_paths["bronze"])
-    bronze_df = spark_session_with_delta.read.format("delta").load(temp_delta_paths["bronze"])
+    bronze_df = spark_session_with_delta.read.format("delta").load(
+        temp_delta_paths["bronze"]
+    )
     bronze_count = bronze_df.count()
-    assert bronze_count == len(sample_kafka_messages), "Bronze should have all Kafka messages"
+    assert bronze_count == len(
+        sample_kafka_messages
+    ), "Bronze should have all Kafka messages"
 
     # Step 3: Start Silver stream (Bronze → Silver Delta)
     silver = SilverStream(
@@ -68,7 +72,9 @@ def test_full_pipeline_ingestion_to_gold(
 
     # Verify Silver
     assert DeltaTable.isDeltaTable(spark_session_with_delta, temp_delta_paths["silver"])
-    silver_df = spark_session_with_delta.read.format("delta").load(temp_delta_paths["silver"])
+    silver_df = spark_session_with_delta.read.format("delta").load(
+        temp_delta_paths["silver"]
+    )
     silver_count = silver_df.count()
     assert silver_count == bronze_count, "Silver should have all Bronze records"
 
@@ -86,7 +92,9 @@ def test_full_pipeline_ingestion_to_gold(
 
     # Verify Gold
     assert DeltaTable.isDeltaTable(spark_session_with_delta, temp_delta_paths["gold"])
-    gold_df = spark_session_with_delta.read.format("delta").load(temp_delta_paths["gold"])
+    gold_df = spark_session_with_delta.read.format("delta").load(
+        temp_delta_paths["gold"]
+    )
     gold_data = gold_df.collect()
 
     # Gold should have fewer records than Silver (aggregation!)
@@ -173,7 +181,9 @@ def test_pipeline_with_late_arriving_data(
     time.sleep(15)
 
     # Verify initial processing
-    gold_df_1 = spark_session_with_delta.read.format("delta").load(temp_delta_paths["gold"])
+    gold_df_1 = spark_session_with_delta.read.format("delta").load(
+        temp_delta_paths["gold"]
+    )
     initial_count = gold_df_1.count()
     assert initial_count >= 1, "Should have processed initial data"
 
@@ -195,10 +205,14 @@ def test_pipeline_with_late_arriving_data(
     time.sleep(15)
 
     # Verify late data processed
-    bronze_df_2 = spark_session_with_delta.read.format("delta").load(temp_delta_paths["bronze"])
+    bronze_df_2 = spark_session_with_delta.read.format("delta").load(
+        temp_delta_paths["bronze"]
+    )
     assert bronze_df_2.count() >= 5, "Bronze should have initial + late data"
 
-    gold_df_2 = spark_session_with_delta.read.format("delta").load(temp_delta_paths["gold"])
+    gold_df_2 = spark_session_with_delta.read.format("delta").load(
+        temp_delta_paths["gold"]
+    )
     final_count = gold_df_2.count()
 
     # Gold count may not change much due to aggregation, but should have processed late data
@@ -232,36 +246,39 @@ def test_pipeline_concurrent_sources(
 
     # Source 1: malware
     for i in range(5):
-        messages.append({
-            "domain": f"source1-domain-{i}.com",
-            "category": "malware",
-            "source": "source1",
-            "source_format": "hosts",
-            "raw_entry": f"0.0.0.0 source1-domain-{i}.com",
-            "ingestion_timestamp": base_time.isoformat(),
-            "metadata": {"source_id": 1},
-        })
+        messages.append(
+            {
+                "domain": f"source1-domain-{i}.com",
+                "category": "malware",
+                "source": "source1",
+                "source_format": "hosts",
+                "raw_entry": f"0.0.0.0 source1-domain-{i}.com",
+                "ingestion_timestamp": base_time.isoformat(),
+                "metadata": {"source_id": 1},
+            }
+        )
 
     # Source 2: ads_trackers
     for i in range(5):
-        messages.append({
-            "domain": f"source2-domain-{i}.net",
-            "category": "ads_trackers",
-            "source": "source2",
-            "source_format": "adblock",
-            "raw_entry": f"||source2-domain-{i}.net^",
-            "ingestion_timestamp": base_time.isoformat(),
-            "metadata": {"source_id": 2},
-        })
+        messages.append(
+            {
+                "domain": f"source2-domain-{i}.net",
+                "category": "ads_trackers",
+                "source": "source2",
+                "source_format": "adblock",
+                "raw_entry": f"||source2-domain-{i}.net^",
+                "ingestion_timestamp": base_time.isoformat(),
+                "metadata": {"source_id": 2},
+            }
+        )
 
     # Publish all at once
     kafka_publish_helper(
-        [m for m in messages if m["category"] == "malware"],
-        topic_key="malware"
+        [m for m in messages if m["category"] == "malware"], topic_key="malware"
     )
     kafka_publish_helper(
         [m for m in messages if m["category"] == "ads_trackers"],
-        topic_key="ads_trackers"
+        topic_key="ads_trackers",
     )
 
     # Start pipeline
@@ -298,7 +315,9 @@ def test_pipeline_concurrent_sources(
     time.sleep(20)  # Wait for processing
 
     # Verify all sources processed
-    gold_df = spark_session_with_delta.read.format("delta").load(temp_delta_paths["gold"])
+    gold_df = spark_session_with_delta.read.format("delta").load(
+        temp_delta_paths["gold"]
+    )
     gold_data = gold_df.collect()
 
     # Should have 10 unique domains
@@ -345,15 +364,17 @@ def test_pipeline_performance_benchmark(
     messages = []
 
     for i in range(batch_size):
-        messages.append({
-            "domain": f"perf-test-domain-{i}.com",
-            "category": "malware" if i % 2 == 0 else "ads_trackers",
-            "source": f"source-{i % 10}",  # 10 different sources
-            "source_format": "hosts",
-            "raw_entry": f"0.0.0.0 perf-test-domain-{i}.com",
-            "ingestion_timestamp": base_time.isoformat(),
-            "metadata": {"batch": "performance_test", "index": i},
-        })
+        messages.append(
+            {
+                "domain": f"perf-test-domain-{i}.com",
+                "category": "malware" if i % 2 == 0 else "ads_trackers",
+                "source": f"source-{i % 10}",  # 10 different sources
+                "source_format": "hosts",
+                "raw_entry": f"0.0.0.0 perf-test-domain-{i}.com",
+                "ingestion_timestamp": base_time.isoformat(),
+                "metadata": {"batch": "performance_test", "index": i},
+            }
+        )
 
     # Publish to Kafka
     malware = [m for m in messages if m["category"] == "malware"]
@@ -402,20 +423,24 @@ def test_pipeline_performance_benchmark(
     processing_time = end_time - start_time
 
     # Verify all processed
-    gold_df = spark_session_with_delta.read.format("delta").load(temp_delta_paths["gold"])
+    gold_df = spark_session_with_delta.read.format("delta").load(
+        temp_delta_paths["gold"]
+    )
     gold_count = gold_df.count()
 
     # Should have 1000 unique domains (no duplicates in this test)
     assert gold_count == batch_size, f"Should have all {batch_size} domains in Gold"
 
     # Log performance metrics
-    print(f"\nPerformance Benchmark Results:")
+    print("\nPerformance Benchmark Results:")
     print(f"  - Records processed: {batch_size}")
     print(f"  - Total time: {processing_time:.2f}s")
     print(f"  - Throughput: {batch_size / processing_time:.2f} records/sec")
 
     # Basic performance assertion (should process 1000 records in reasonable time)
-    assert processing_time < 60, f"Processing {batch_size} records should take < 60s, took {processing_time:.2f}s"
+    assert (
+        processing_time < 60
+    ), f"Processing {batch_size} records should take < 60s, took {processing_time:.2f}s"
 
     # Stop all with cleanup delay
     bq.stop()
@@ -456,7 +481,9 @@ def test_pipeline_failure_recovery(
     time.sleep(10)
 
     # Verify Bronze processed
-    bronze_df_1 = spark_session_with_delta.read.format("delta").load(temp_delta_paths["bronze"])
+    bronze_df_1 = spark_session_with_delta.read.format("delta").load(
+        temp_delta_paths["bronze"]
+    )
     bronze_count_1 = bronze_df_1.count()
     assert bronze_count_1 >= 4, "Bronze should have processed initial data"
 
@@ -481,7 +508,9 @@ def test_pipeline_failure_recovery(
 
     # Bronze continues processing
     time.sleep(10)
-    bronze_df_2 = spark_session_with_delta.read.format("delta").load(temp_delta_paths["bronze"])
+    bronze_df_2 = spark_session_with_delta.read.format("delta").load(
+        temp_delta_paths["bronze"]
+    )
     bronze_count_2 = bronze_df_2.count()
     assert bronze_count_2 > bronze_count_1, "Bronze should process new data"
 
@@ -490,9 +519,13 @@ def test_pipeline_failure_recovery(
     time.sleep(15)
 
     # Verify Silver caught up
-    silver_df = spark_session_with_delta.read.format("delta").load(temp_delta_paths["silver"])
+    silver_df = spark_session_with_delta.read.format("delta").load(
+        temp_delta_paths["silver"]
+    )
     silver_count = silver_df.count()
-    assert silver_count == bronze_count_2, "Silver should catch up to Bronze after recovery"
+    assert (
+        silver_count == bronze_count_2
+    ), "Silver should catch up to Bronze after recovery"
 
     # Verify no duplicates (exactly-once semantics)
     silver_data = silver_df.collect()

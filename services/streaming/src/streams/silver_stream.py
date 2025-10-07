@@ -11,8 +11,6 @@ from pyspark.sql.functions import (
     col,
     current_timestamp,
     when,
-    lower,
-    trim,
     udf,
 )
 from pyspark.sql.types import StringType, BooleanType

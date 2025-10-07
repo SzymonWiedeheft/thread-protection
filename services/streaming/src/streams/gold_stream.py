@@ -163,8 +163,7 @@ class GoldStream:
             .withColumn(
                 "is_active",
                 when(
-                    col("last_seen")
-                    >= current_timestamp() - expr("INTERVAL 7 DAYS"),
+                    col("last_seen") >= current_timestamp() - expr("INTERVAL 7 DAYS"),
                     "true",
                 ).otherwise("false"),
             )
@@ -271,7 +270,9 @@ class GoldStream:
                         col("gold.first_seen"),
                     ).otherwise(col("updates.first_seen")),
                     # Last seen: Keep latest timestamp
-                    "last_seen": greatest(col("gold.last_seen"), col("updates.last_seen")),
+                    "last_seen": greatest(
+                        col("gold.last_seen"), col("updates.last_seen")
+                    ),
                     # Last updated: Current timestamp
                     "last_updated": current_timestamp(),
                     # Active status: Update based on last_seen

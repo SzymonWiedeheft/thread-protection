@@ -6,6 +6,7 @@ from aiohttp import ClientError, ServerTimeoutError
 from common import FetchError
 from fetchers import HTTPFetcher
 
+
 @pytest.mark.asyncio
 async def test_http_fetcher_success():
     """Test successful HTTP fetch."""

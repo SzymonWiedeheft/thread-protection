@@ -354,7 +354,7 @@ class KafkaHealthCheckOperator(BaseOperator):
                 )
 
             return {
-                "status": "healthy",
+                "status": "success",
                 "brokers": broker_count,
                 "topics": list(cluster_metadata),
             }

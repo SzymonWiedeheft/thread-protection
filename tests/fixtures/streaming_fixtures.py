@@ -11,8 +11,6 @@ from typing import Generator, Dict, List
 from pyspark.sql import SparkSession
 import structlog
 
-from schemas.domain import DomainModel
-
 logger = structlog.get_logger()
 
 
@@ -51,15 +49,20 @@ def spark_session_with_delta(
     """Create Spark session configured for Delta Lake and Kafka."""
 
     builder = (
-        SparkSession.builder
-        .appName("IntegrationTest-Streaming")
+        SparkSession.builder.appName("IntegrationTest-Streaming")
         .master("local[2]")  # Use 2 cores for parallel processing
         .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
-        .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog")
+        .config(
+            "spark.sql.catalog.spark_catalog",
+            "org.apache.spark.sql.delta.catalog.DeltaCatalog",
+        )
         .config("spark.sql.shuffle.partitions", "2")  # Reduce for testing
         .config("spark.default.parallelism", "2")
         .config("spark.sql.streaming.schemaInference", "true")
-        .config("spark.sql.streaming.checkpointLocation", temp_delta_paths["checkpoints_bronze"])
+        .config(
+            "spark.sql.streaming.checkpointLocation",
+            temp_delta_paths["checkpoints_bronze"],
+        )
         # Kafka configurations
         .config("spark.kafka.bootstrap.servers", kafka_bootstrap_servers)
         # Delta Lake optimizations for testing
@@ -69,7 +72,7 @@ def spark_session_with_delta(
         .config(
             "spark.jars.packages",
             "io.delta:delta-spark_2.12:3.3.2,"
-            "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0"
+            "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0",
         )
     )
 
@@ -392,10 +395,12 @@ def kafka_publish_helper(kafka_producer, kafka_topics):
                 kafka_producer.send(topic, key=b"null_message", value=b"")
             else:
                 # Serialize to JSON
-                value = json.dumps(msg).encode('utf-8')
+                value = json.dumps(msg).encode("utf-8")
 
                 # Use domain as key for partitioning (if present)
-                key = msg.get("domain", "").encode('utf-8') if msg.get("domain") else None
+                key = (
+                    msg.get("domain", "").encode("utf-8") if msg.get("domain") else None
+                )
 
                 kafka_producer.send(
                     topic,

@@ -17,7 +17,10 @@ __all__ = [
 # the package without pulling in pyspark.
 try:
     from schemas import delta_schemas  # type: ignore
-except ModuleNotFoundError as delta_import_error:  # pragma: no cover - only hit in non-Spark envs
+except (
+    ModuleNotFoundError
+) as delta_import_error:  # pragma: no cover - only hit in non-Spark envs
+    print(f"Module '{delta_import_error}' not found.")
 
     class _DeltaSchemasProxy:
         """Proxy that raises a helpful error if Delta helpers are accessed without pyspark."""
@@ -26,7 +29,7 @@ except ModuleNotFoundError as delta_import_error:  # pragma: no cover - only hit
             raise ModuleNotFoundError(
                 "schemas.delta_schemas requires pyspark to be installed in this environment. "
                 "Install pyspark (e.g. pip install pyspark==3.5.*) before using Delta helpers."
-            ) from delta_import_error
+            )
 
     delta_schemas = _DeltaSchemasProxy()  # type: ignore[assignment]
 else:  # pragma: no cover - exercised in Spark-enabled environments

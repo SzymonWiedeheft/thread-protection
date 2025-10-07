@@ -13,6 +13,10 @@ SPARK_CONF = {
     # Delta Lake configuration
     "spark.sql.extensions": "io.delta.sql.DeltaSparkSessionExtension",
     "spark.sql.catalog.spark_catalog": "org.apache.spark.sql.delta.catalog.DeltaCatalog",
+    # Hive Metastore configuration (shared with Trino)
+    "spark.sql.catalogImplementation": "hive",
+    "spark.hadoop.hive.metastore.uris": "thrift://hive-metastore:9083",
+    "spark.sql.warehouse.dir": "/data/delta",
     # Streaming configuration
     "spark.sql.streaming.schemaInference": "true",
     # Performance tuning
@@ -133,7 +137,12 @@ def create_spark_session(
         >>> spark.version
         '3.5.0'
     """
-    logger.info("Creating Spark session", app_name=app_name, master=master, stream_type=stream_type)
+    logger.info(
+        "Creating Spark session",
+        app_name=app_name,
+        master=master,
+        stream_type=stream_type,
+    )
 
     builder = SparkSession.builder.appName(app_name)
 

@@ -72,7 +72,7 @@ def create_delta_table_if_not_exists(
         except Exception as e:
             logger.warning(
                 "Delta table verification read returned error (may be transient)",
-                error=str(e)
+                error=str(e),
             )
     else:
         logger.info("Delta table already exists", table_path=table_path)

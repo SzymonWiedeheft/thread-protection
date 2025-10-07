@@ -95,7 +95,9 @@ class TestBronzeStream:
             "src.streams.bronze_stream.col"
         ), patch("src.streams.bronze_stream.current_timestamp"), patch(
             "src.streams.bronze_stream.to_date"
-        ), patch("src.streams.bronze_stream.to_timestamp"):
+        ), patch(
+            "src.streams.bronze_stream.to_timestamp"
+        ):
             # Setup mock chain
             mock_select1 = Mock()
             mock_select2 = Mock()

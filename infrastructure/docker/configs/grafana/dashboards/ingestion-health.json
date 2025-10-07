@@ -92,7 +92,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "thread_protection_ingestion_pipeline_health{pipeline=\"domain_ingestion\"}",
+          "expr": "thread_protection_ingestion_pipeline_health",
           "legendFormat": "",
           "range": true,
           "refId": "A"
@@ -167,7 +167,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "thread_protection_ingestion_component_health{pipeline=\"domain_ingestion\"}",
+          "expr": "thread_protection_ingestion_component_health",
           "format": "table",
           "instant": false,
           "legendFormat": "{{component}}",
@@ -228,7 +228,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "thread_protection_ingestion_pipeline_failed_checks_total{pipeline=\"domain_ingestion\"}",
+          "expr": "thread_protection_ingestion_pipeline_failed_checks_total",
           "legendFormat": "Failed Checks",
           "range": true,
           "refId": "A"

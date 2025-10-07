@@ -23,7 +23,9 @@ def gather_samples(registry) -> List:
     return samples
 
 
-def test_push_health_snapshot_creates_expected_metrics(component_statuses: Dict[str, bool]) -> None:
+def test_push_health_snapshot_creates_expected_metrics(
+    component_statuses: Dict[str, bool]
+) -> None:
     metrics = PrometheusMetrics(
         pushgateway_url="http://example.com:9091",
         job_name="test_job",

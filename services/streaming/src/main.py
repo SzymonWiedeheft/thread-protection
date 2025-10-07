@@ -8,7 +8,6 @@ import sys
 import signal
 import argparse
 import time
-from typing import Optional
 import structlog
 
 from .config.spark_config import (

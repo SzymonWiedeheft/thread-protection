@@ -126,9 +126,13 @@ class TestGoldStream:
         mock_when_result.otherwise.return_value.alias.return_value = Mock()
 
         # Patch Spark functions
-        with patch("src.streams.gold_stream.when", return_value=mock_when_result), patch(
+        with patch(
+            "src.streams.gold_stream.when", return_value=mock_when_result
+        ), patch(
             "src.streams.gold_stream.collect_set", return_value=MockColumn()
-        ), patch("src.streams.gold_stream.to_json", return_value=MockColumn()), patch(
+        ), patch(
+            "src.streams.gold_stream.to_json", return_value=MockColumn()
+        ), patch(
             "src.streams.gold_stream.size", return_value=MockColumn()
         ), patch(
             "src.streams.gold_stream.first", return_value=MockColumn()
@@ -193,9 +197,13 @@ class TestGoldStream:
         mock_when_result.otherwise.return_value = Mock()
 
         # Patch all PySpark functions used in upsert_to_gold
-        with patch("src.streams.gold_stream.when", return_value=mock_when_result), patch(
+        with patch(
+            "src.streams.gold_stream.when", return_value=mock_when_result
+        ), patch(
             "src.streams.gold_stream.col", side_effect=lambda x: MockColumn()
-        ), patch("src.streams.gold_stream.to_json", return_value=MockColumn()), patch(
+        ), patch(
+            "src.streams.gold_stream.to_json", return_value=MockColumn()
+        ), patch(
             "src.streams.gold_stream.array_distinct", return_value=MockColumn()
         ), patch(
             "src.streams.gold_stream.array_union", return_value=MockColumn()
@@ -247,9 +255,7 @@ class TestGoldStream:
             assert gold_stream.batch_counter == 1
 
     @patch("src.streams.gold_stream.DeltaTable")
-    def test_upsert_to_gold_table_not_exists(
-        self, mock_delta_table_class, gold_stream
-    ):
+    def test_upsert_to_gold_table_not_exists(self, mock_delta_table_class, gold_stream):
         """Test UPSERT operation when table doesn't exist (first batch)."""
         # Mock table doesn't exist
         mock_delta_table_class.isDeltaTable.return_value = False
@@ -282,9 +288,13 @@ class TestGoldStream:
         mock_when_result.otherwise.return_value = Mock()
 
         # Patch all PySpark functions used in upsert_to_gold
-        with patch("src.streams.gold_stream.when", return_value=mock_when_result), patch(
+        with patch(
+            "src.streams.gold_stream.when", return_value=mock_when_result
+        ), patch(
             "src.streams.gold_stream.col", side_effect=lambda x: MockColumn()
-        ), patch("src.streams.gold_stream.to_json", return_value=MockColumn()), patch(
+        ), patch(
+            "src.streams.gold_stream.to_json", return_value=MockColumn()
+        ), patch(
             "src.streams.gold_stream.array_distinct", return_value=MockColumn()
         ), patch(
             "src.streams.gold_stream.array_union", return_value=MockColumn()

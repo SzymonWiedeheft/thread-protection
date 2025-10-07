@@ -80,7 +80,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "master_aliveWorkers{service=\"spark-master\"}",
+          "expr": "metrics_master_aliveWorkers_Value{service=\"spark-master\"}",
           "legendFormat": "",
           "range": true,
           "refId": "A"
@@ -142,7 +142,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum(master_totalCores{service=\"spark-master\"})",
+          "expr": "sum(metrics_worker_coresUsed_Value{service=\"spark-worker\"}) + sum(metrics_worker_coresFree_Value{service=\"spark-worker\"})",
           "legendFormat": "Total Cores",
           "range": true,
           "refId": "A"
@@ -202,7 +202,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "worker_memoryFree{service=\"spark-worker\"}",
+          "expr": "metrics_worker_memFree_MB_Value{service=\"spark-worker\"}",
           "legendFormat": "{{instance}}",
           "range": true,
           "refId": "A"

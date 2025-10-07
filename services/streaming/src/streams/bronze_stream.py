@@ -13,7 +13,6 @@ from pyspark.sql.functions import (
     current_timestamp,
     to_date,
     to_timestamp,
-    lit,
 )
 from pyspark.sql.types import (
     StructType,
@@ -24,7 +23,7 @@ from pyspark.sql.types import (
 import structlog
 
 from schemas import delta_schemas
-from ..utils.kafka_utils import get_kafka_options, extract_kafka_metadata_expr
+from ..utils.kafka_utils import get_kafka_options
 from ..utils.delta_utils import (
     create_delta_table_if_not_exists,
     register_delta_table,
@@ -117,7 +116,11 @@ class BronzeStream:
         Returns:
             Streaming DataFrame with raw Kafka messages
         """
-        logger.info("Starting Kafka read stream", topics=self.topics, starting_offsets=self.starting_offsets)
+        logger.info(
+            "Starting Kafka read stream",
+            topics=self.topics,
+            starting_offsets=self.starting_offsets,
+        )
 
         kafka_options = get_kafka_options(
             bootstrap_servers=self.bootstrap_servers,
