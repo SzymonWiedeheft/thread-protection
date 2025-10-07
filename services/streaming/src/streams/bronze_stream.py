@@ -205,6 +205,7 @@ class BronzeStream:
     def write_to_delta(self, bronze_df: DataFrame):
         """
         Write streaming DataFrame to Bronze Delta table.
+        Table will be auto-created on first write with specified properties.
 
         Args:
             bronze_df: Transformed DataFrame matching Bronze schema
@@ -218,15 +219,31 @@ class BronzeStream:
             checkpoint=self.checkpoint_path,
         )
 
-        query = write_stream_to_delta(
-            bronze_df,
-            self.delta_path,
-            self.checkpoint_path,
-            output_mode="append",
-            partition_by=["ingestion_date"],
-            trigger_interval=self.trigger_interval,
-            query_name="bronze_stream",
+        # Configure write with table properties
+        writer = (
+            bronze_df.writeStream.format("delta")
+            .outputMode("append")
+            .option("checkpointLocation", self.checkpoint_path)
+            .partitionBy("ingestion_date")
+            .queryName("bronze_stream")
+            # Delta table properties (applied on table creation)
+            .option("delta.enableChangeDataFeed", "true")
+            .option("delta.autoOptimize.optimizeWrite", "true")
+            .option("delta.autoOptimize.autoCompact", "true")
         )
+
+        # Parse trigger interval
+        if self.trigger_interval:
+            if "second" in self.trigger_interval.lower():
+                import re
+                seconds = int(re.findall(r"\d+", self.trigger_interval)[0])
+                writer = writer.trigger(processingTime=f"{seconds} seconds")
+            elif "minute" in self.trigger_interval.lower():
+                import re
+                minutes = int(re.findall(r"\d+", self.trigger_interval)[0])
+                writer = writer.trigger(processingTime=f"{minutes} minutes")
+
+        query = writer.start(self.delta_path)
 
         logger.info(
             "Bronze stream query started",
@@ -241,11 +258,10 @@ class BronzeStream:
         Start the Bronze streaming pipeline.
 
         Pipeline flow:
-        1. Initialize Delta table (if needed)
-        2. Read from Kafka
-        3. Transform to Bronze schema
-        4. Write to Delta Lake
-        5. Return streaming query
+        1. Read from Kafka
+        2. Transform to Bronze schema
+        3. Write to Delta Lake (table created on first write)
+        4. Return streaming query
 
         Returns:
             StreamingQuery object
@@ -258,16 +274,13 @@ class BronzeStream:
         logger.info("Starting Bronze streaming pipeline")
 
         try:
-            # Step 1: Initialize Delta table
-            self.initialize_delta_table()
-
-            # Step 2: Read from Kafka
+            # Step 1: Read from Kafka
             kafka_df = self.read_from_kafka()
 
-            # Step 3: Transform
+            # Step 2: Transform
             bronze_df = self.transform(kafka_df)
 
-            # Step 4: Write to Delta
+            # Step 3: Write to Delta (table will be created on first write)
             query = self.write_to_delta(bronze_df)
 
             logger.info("Bronze streaming pipeline started successfully")

@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-"""Main entry point for Bronze streaming service.
+"""Main entry point for streaming services.
 
-This module runs the Bronze layer streaming pipeline that reads domain data
-from Kafka topics and writes to Delta Lake Bronze table.
+This module runs Bronze/Silver/Gold layer streaming pipelines.
 """
 
 import sys
@@ -21,6 +20,8 @@ from .config.spark_config import (
     get_trigger_interval,
 )
 from .streams.bronze_stream import create_bronze_stream
+from .streams.silver_stream import SilverStream
+from .streams.gold_stream import GoldStream
 
 # Configure structured logging
 structlog.configure(
@@ -29,7 +30,7 @@ structlog.configure(
         structlog.processors.add_log_level,
         structlog.processors.JSONRenderer(),
     ],
-    wrapper_class=structlog.make_filtering_bound_logger(logging_level=20),  # INFO level
+    wrapper_class=structlog.make_filtering_bound_logger(20),  # INFO level
     context_class=dict,
     logger_factory=structlog.PrintLoggerFactory(),
     cache_logger_on_first_use=True,
@@ -48,7 +49,16 @@ def parse_args() -> argparse.Namespace:
         Parsed arguments namespace
     """
     parser = argparse.ArgumentParser(
-        description="Bronze layer streaming service - Kafka to Delta Lake"
+        description="Streaming service - Bronze/Silver/Gold layers"
+    )
+
+    # Stream type
+    parser.add_argument(
+        "--stream-type",
+        type=str,
+        required=True,
+        choices=["bronze", "silver", "gold"],
+        help="Type of stream to run (bronze, silver, or gold)",
     )
 
     # Spark configuration
@@ -61,8 +71,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--app-name",
         type=str,
-        default="BronzeStreamingService",
-        help="Spark application name",
+        default=None,
+        help="Spark application name (default: <stream-type>StreamingService)",
     )
 
     # Kafka configuration
@@ -184,7 +194,7 @@ def monitor_query_progress(query, interval: int = 30) -> None:
 
 
 def main() -> int:
-    """Main function to run Bronze streaming service.
+    """Main function to run streaming service.
 
     Returns:
         Exit code (0 for success, 1 for failure)
@@ -194,9 +204,13 @@ def main() -> int:
     # Parse arguments
     args = parse_args()
 
+    # Set default app name based on stream type if not provided
+    app_name = args.app_name or f"{args.stream_type.capitalize()}StreamingService"
+
     logger.info(
-        "Starting Bronze streaming service",
-        app_name=args.app_name,
+        "Starting streaming service",
+        stream_type=args.stream_type,
+        app_name=app_name,
         master=args.master or "local",
     )
 
@@ -204,11 +218,12 @@ def main() -> int:
     setup_signal_handlers()
 
     try:
-        # Create Spark session
+        # Create Spark session with stream-specific resource profile
         logger.info("Creating Spark session...")
         spark = create_spark_session(
-            app_name=args.app_name,
+            app_name=app_name,
             master=args.master,
+            stream_type=args.stream_type,
         )
 
         logger.info(
@@ -217,31 +232,79 @@ def main() -> int:
             master=spark.sparkContext.master,
         )
 
-        # Prepare Bronze stream configuration
-        bronze_config = {}
+        # Create and start stream based on type
+        if args.stream_type == "bronze":
+            # Prepare Bronze stream configuration
+            bronze_config = {}
 
-        if args.bootstrap_servers:
-            bronze_config["bootstrap_servers"] = args.bootstrap_servers
-        if args.topics:
-            bronze_config["topics"] = args.topics
-        if args.delta_path:
-            bronze_config["delta_path"] = args.delta_path
-        if args.checkpoint_path:
-            bronze_config["checkpoint_path"] = args.checkpoint_path
-        if args.trigger_interval:
-            bronze_config["trigger_interval"] = args.trigger_interval
+            if args.bootstrap_servers:
+                bronze_config["bootstrap_servers"] = args.bootstrap_servers
+            if args.topics:
+                bronze_config["topics"] = args.topics
+            if args.delta_path:
+                bronze_config["delta_path"] = args.delta_path
+            if args.checkpoint_path:
+                bronze_config["checkpoint_path"] = args.checkpoint_path
+            if args.trigger_interval:
+                bronze_config["trigger_interval"] = args.trigger_interval
+            if args.starting_offsets:
+                bronze_config["starting_offsets"] = args.starting_offsets
 
-        logger.info("Bronze stream configuration", config=bronze_config)
+            logger.info("Bronze stream configuration", config=bronze_config)
 
-        # Create and start Bronze stream
-        logger.info("Creating Bronze stream...")
-        bronze = create_bronze_stream(spark, **bronze_config)
+            # Create and start Bronze stream
+            logger.info("Creating Bronze stream...")
+            bronze = create_bronze_stream(spark, **bronze_config)
 
-        logger.info("Starting Bronze streaming pipeline...")
-        streaming_query = bronze.start()
+            logger.info("Starting Bronze streaming pipeline...")
+            streaming_query = bronze.start()
+
+        elif args.stream_type == "silver":
+            # Prepare Silver stream configuration
+            silver_config = {
+                "spark": spark,
+            }
+
+            if args.delta_path:
+                silver_config["silver_path"] = args.delta_path
+            if args.checkpoint_path:
+                silver_config["checkpoint_path"] = args.checkpoint_path
+            if args.trigger_interval:
+                silver_config["trigger_interval"] = args.trigger_interval
+
+            logger.info("Silver stream configuration", config=silver_config)
+
+            # Create and start Silver stream
+            logger.info("Creating Silver stream...")
+            silver = SilverStream(**silver_config)
+
+            logger.info("Starting Silver streaming pipeline...")
+            streaming_query = silver.start()
+
+        elif args.stream_type == "gold":
+            # Prepare Gold stream configuration
+            gold_config = {
+                "spark": spark,
+            }
+
+            if args.delta_path:
+                gold_config["gold_path"] = args.delta_path
+            if args.checkpoint_path:
+                gold_config["checkpoint_path"] = args.checkpoint_path
+            if args.trigger_interval:
+                gold_config["trigger_interval"] = args.trigger_interval
+
+            logger.info("Gold stream configuration", config=gold_config)
+
+            # Create and start Gold stream
+            logger.info("Creating Gold stream...")
+            gold = GoldStream(**gold_config)
+
+            logger.info("Starting Gold streaming pipeline...")
+            streaming_query = gold.start()
 
         logger.info(
-            "Bronze streaming pipeline started successfully",
+            f"{args.stream_type.capitalize()} streaming pipeline started successfully",
             query_id=streaming_query.id,
             query_name=streaming_query.name,
         )
@@ -252,7 +315,7 @@ def main() -> int:
         # Wait for termination (should not reach here unless query stops)
         streaming_query.awaitTermination()
 
-        logger.info("Bronze streaming pipeline terminated")
+        logger.info(f"{args.stream_type.capitalize()} streaming pipeline terminated")
         return 0
 
     except KeyboardInterrupt:
@@ -263,7 +326,7 @@ def main() -> int:
 
     except Exception as e:
         logger.error(
-            "Fatal error in Bronze streaming service",
+            f"Fatal error in {args.stream_type} streaming service",
             error=str(e),
             error_type=type(e).__name__,
             exc_info=True,
@@ -282,7 +345,7 @@ def main() -> int:
         return 1
 
     finally:
-        logger.info("Bronze streaming service shutting down")
+        logger.info(f"{args.stream_type.capitalize()} streaming service shutting down")
 
 
 if __name__ == "__main__":

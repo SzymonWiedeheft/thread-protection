@@ -390,16 +390,13 @@ class GoldStream:
         logger.info("Starting Gold streaming pipeline")
 
         try:
-            # Step 1: Initialize Delta table
-            self.initialize_delta_table()
-
-            # Step 2: Read from Silver Delta
+            # Step 1: Read from Silver Delta
             silver_df = self.read_from_silver()
 
-            # Step 3: Aggregate
+            # Step 2: Aggregate
             aggregated_df = self.aggregate(silver_df)
 
-            # Step 4: Write to Gold Delta with MERGE
+            # Step 3: Write to Gold Delta with MERGE (table created on first write)
             query = self.write_to_delta(aggregated_df)
 
             logger.info("Gold streaming pipeline started successfully")

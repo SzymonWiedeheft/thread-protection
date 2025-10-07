@@ -258,16 +258,13 @@ class SilverStream:
         logger.info("Starting Silver streaming pipeline")
 
         try:
-            # Step 1: Initialize Delta table
-            self.initialize_delta_table()
-
-            # Step 2: Read from Bronze Delta
+            # Step 1: Read from Bronze Delta
             bronze_df = self.read_from_bronze()
 
-            # Step 3: Transform
+            # Step 2: Transform
             silver_df = self.transform(bronze_df)
 
-            # Step 4: Write to Silver Delta
+            # Step 3: Write to Silver Delta (table created on first write)
             query = self.write_to_delta(silver_df)
 
             logger.info("Silver streaming pipeline started successfully")

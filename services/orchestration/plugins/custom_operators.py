@@ -1,7 +1,9 @@
 """Custom Airflow operators for domain ingestion pipeline."""
 
+import os
 import subprocess
 import json
+from pathlib import Path
 from typing import Any, Dict, Optional
 from datetime import datetime
 
@@ -9,7 +11,8 @@ from airflow.models import BaseOperator
 from airflow.utils.decorators import apply_defaults
 from airflow.exceptions import AirflowException
 from kafka import KafkaConsumer, KafkaAdminClient
-from kafka.errors import KafkaError
+from kafka.admin import NewTopic
+from kafka.errors import KafkaError, TopicAlreadyExistsError
 import structlog
 
 logger = structlog.get_logger()
@@ -61,14 +64,36 @@ class IngestionOperator(BaseOperator):
             mode=self.execution_mode,
         )
 
+        if self.execution_mode == "docker":
+            try:
+                return self._execute_docker()
+            except AirflowException as exc:
+                message = str(exc).lower()
+                if "permission denied" in message and "docker daemon socket" in message:
+                    local_entrypoint = Path("/opt/ingestion/src/main.py")
+                    if not local_entrypoint.exists():
+                        logger.error(
+                            "Docker unavailable and local ingestion entrypoint missing",
+                            fallback_path=str(local_entrypoint),
+                        )
+                        raise
+
+                    logger.warning(
+                        "Docker runtime unavailable, falling back to subprocess execution"
+                    )
+                    return self._execute_subprocess()
+                raise
+            except FileNotFoundError:
+                logger.warning(
+                    "Docker CLI not found in Airflow environment, falling back to subprocess execution"
+                )
+                return self._execute_subprocess()
+
         if self.execution_mode == "subprocess":
             return self._execute_subprocess()
-        elif self.execution_mode == "docker":
-            return self._execute_docker()
-        else:
-            raise AirflowException(
-                f"Unknown execution_mode: {self.execution_mode}"
-            )
+        raise AirflowException(
+            f"Unknown execution_mode: {self.execution_mode}"
+        )
 
     def _execute_subprocess(self) -> Dict[str, Any]:
         """Execute ingestion as subprocess."""
@@ -84,6 +109,20 @@ class IngestionOperator(BaseOperator):
 
         logger.info("Running command", cmd=" ".join(cmd))
 
+        ingestion_root = Path("/opt/ingestion")
+
+        extra_python_paths = [
+            "/opt/ingestion/src",
+            "/opt/packages/common",
+            "/opt/packages/schemas",
+        ]
+
+        env = os.environ.copy()
+        existing_pythonpath = env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = os.pathsep.join(
+            [path for path in extra_python_paths] + ([existing_pythonpath] if existing_pythonpath else [])
+        )
+
         try:
             result = subprocess.run(
                 cmd,
@@ -91,6 +130,8 @@ class IngestionOperator(BaseOperator):
                 capture_output=True,
                 text=True,
                 timeout=600,  # 10 minute timeout
+                env=env,
+                cwd=str(ingestion_root) if ingestion_root.exists() else None,
             )
 
             logger.info("Ingestion completed", stdout=result.stdout)
@@ -186,6 +227,10 @@ class KafkaHealthCheckOperator(BaseOperator):
         self,
         kafka_servers: str = "kafka:9092",
         topics: Optional[list] = None,
+        create_missing: bool = True,
+        num_partitions: int = 1,
+        replication_factor: int = 1,
+        topic_configs: Optional[Dict[str, Dict[str, str]]] = None,
         *args,
         **kwargs,
     ):
@@ -199,10 +244,16 @@ class KafkaHealthCheckOperator(BaseOperator):
         super().__init__(*args, **kwargs)
         self.kafka_servers = kafka_servers
         self.topics = topics or ["malware_domains", "ads_trackers_domains"]
+        self.create_missing = create_missing
+        self.num_partitions = num_partitions
+        self.replication_factor = replication_factor
+        self.topic_configs = topic_configs or {}
 
     def execute(self, context: Dict[str, Any]) -> Dict[str, Any]:
         """Check Kafka health."""
         logger.info("Checking Kafka health", servers=self.kafka_servers)
+
+        admin_client: Optional[KafkaAdminClient] = None
 
         try:
             # Check broker connectivity
@@ -212,34 +263,111 @@ class KafkaHealthCheckOperator(BaseOperator):
                 request_timeout_ms=5000,
             )
 
-            # Get cluster metadata
             cluster_metadata = admin_client.list_topics()
 
+            broker_count = len(admin_client._client.cluster.brokers())
             logger.info(
                 "Kafka brokers healthy",
-                broker_count=len(admin_client._client.cluster.brokers()),
+                broker_count=broker_count,
                 topics=len(cluster_metadata),
             )
 
-            # Check required topics exist
             missing_topics = set(self.topics) - set(cluster_metadata)
+
+            if missing_topics and self.create_missing:
+                logger.info(
+                    "Creating missing Kafka topics",
+                    topics=list(missing_topics),
+                    partitions=self.num_partitions,
+                    replication_factor=self.replication_factor,
+                )
+
+                new_topics = [
+                    NewTopic(
+                        name=topic,
+                        num_partitions=self.num_partitions,
+                        replication_factor=self.replication_factor,
+                        topic_configs=self.topic_configs.get(topic, {}),
+                    )
+                    for topic in missing_topics
+                ]
+
+                creation_result = admin_client.create_topics(
+                    new_topics=new_topics,
+                    timeout_ms=5000,
+                )
+
+                if isinstance(creation_result, dict):
+                    futures = creation_result
+                    for topic, future in futures.items():
+                        try:
+                            future.result()
+                            logger.info("Kafka topic created", topic=topic)
+                        except TopicAlreadyExistsError:
+                            logger.info("Kafka topic already exists", topic=topic)
+                        except KafkaError as topic_error:
+                            logger.error(
+                                "Failed to create Kafka topic",
+                                topic=topic,
+                                error=str(topic_error),
+                            )
+                            raise AirflowException(
+                                f"Failed to create Kafka topic {topic}: {topic_error}"
+                            ) from topic_error
+                else:
+                    topic_errors = getattr(creation_result, "topic_errors", [])
+
+                    for topic_error in topic_errors:
+                        topic_name = getattr(topic_error, "topic", None)
+                        error_code = getattr(topic_error, "error_code", None)
+
+                        if error_code == 0:
+                            logger.info("Kafka topic created", topic=topic_name)
+                            continue
+
+                        if (
+                            error_code is not None
+                            and error_code == TopicAlreadyExistsError.errno
+                        ):
+                            logger.info(
+                                "Kafka topic already exists",
+                                topic=topic_name,
+                            )
+                            continue
+
+                        error_message = getattr(topic_error, "error", None)
+                        logger.error(
+                            "Failed to create Kafka topic",
+                            topic=topic_name,
+                            error=error_message or error_code,
+                        )
+                        raise AirflowException(
+                            f"Failed to create Kafka topic {topic_name}: {error_message or error_code}"
+                        )
+
+                cluster_metadata = admin_client.list_topics()
+                missing_topics = set(self.topics) - set(cluster_metadata)
 
             if missing_topics:
                 raise AirflowException(
                     f"Missing required topics: {missing_topics}"
                 )
 
-            admin_client.close()
-
             return {
                 "status": "healthy",
-                "brokers": len(admin_client._client.cluster.brokers()),
+                "brokers": broker_count,
                 "topics": list(cluster_metadata),
             }
 
         except KafkaError as e:
             logger.error("Kafka health check failed", error=str(e))
             raise AirflowException(f"Kafka unhealthy: {str(e)}")
+        finally:
+            if admin_client is not None:
+                try:
+                    admin_client.close()
+                except Exception:
+                    pass
 
 
 class DataFreshnessCheckOperator(BaseOperator):

@@ -28,7 +28,9 @@ services:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9092
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
@@ -47,44 +49,180 @@ services:
 
   # ============ Spark ============
   spark-master:
-    image: bitnami/spark:3.5.0
+    image: spark:3.5.6-scala2.12-java11-python3-ubuntu
     container_name: spark-master
     environment:
-      - SPARK_MODE=master
-      - SPARK_RPC_AUTHENTICATION_ENABLED=no
-      - SPARK_RPC_ENCRYPTION_ENABLED=no
-      - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
-      - SPARK_SSL_ENABLED=no
+      - SPARK_NO_DAEMONIZE=true
     ports:
       - "8080:8080"  # Spark Master Web UI
       - "7077:7077"  # Spark Master
     volumes:
-      - ./../../data:/opt/data
+      - ./../../data:/data
       - ./../../services/streaming:/opt/streaming
     networks:
       - pipeline-network
+    command: ["/bin/bash", "-c", "/opt/spark/sbin/start-master.sh --host spark-master --port 7077 --webui-port 8080"]
 
   spark-worker:
-    image: bitnami/spark:3.5.0
+    image: thread-protection-streaming:latest
     container_name: spark-worker
     depends_on:
       - spark-master
+    user: root
     environment:
-      - SPARK_MODE=worker
-      - SPARK_MASTER_URL=spark://spark-master:7077
-      - SPARK_WORKER_MEMORY=2G
+      - SPARK_NO_DAEMONIZE=true
+      - SPARK_WORKER_MEMORY=4G
       - SPARK_WORKER_CORES=2
-      - SPARK_RPC_AUTHENTICATION_ENABLED=no
-      - SPARK_RPC_ENCRYPTION_ENABLED=no
-      - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
-      - SPARK_SSL_ENABLED=no
+      - PYSPARK_PYTHON=/usr/local/bin/python3.11
     volumes:
-      - ./../../data:/opt/data
+      - ./../../data:/data
       - ./../../services/streaming:/opt/streaming
     networks:
       - pipeline-network
+    entrypoint: ["/bin/bash"]
+    command: ["-c", "/opt/spark/sbin/start-worker.sh spark://spark-master:7077"]
+
+  spark-worker-trino:
+    image: thread-protection-streaming:latest
+    container_name: spark-worker-trino
+    depends_on:
+      - spark-master
+    user: root
+    environment:
+      - SPARK_NO_DAEMONIZE=true
+      - SPARK_WORKER_MEMORY=2G
+      - SPARK_WORKER_CORES=1
+      - PYSPARK_PYTHON=/usr/local/bin/python3.11
+    volumes:
+      - ./../../data:/data
+    networks:
+      - pipeline-network
+    entrypoint: ["/bin/bash"]
+    command: ["-c", "/opt/spark/sbin/start-worker.sh spark://spark-master:7077"]
+
+  # ============ Streaming Jobs ============
+  bronze-stream:
+    image: thread-protection-streaming:latest
+    container_name: bronze-stream
+    depends_on:
+      - kafka
+      - spark-master
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - KAFKA_TOPICS=domains.malware,domains.phishing,domains.ads
+      - DELTA_BASE_PATH=/data/delta
+      - CHECKPOINT_BASE_PATH=/data/checkpoints
+      - SPARK_MASTER=spark://spark-master:7077
+    volumes:
+      - ./../../data:/data
+      - ./../../services/streaming/src:/app/services/streaming/src
+    networks:
+      - pipeline-network
+    command:
+      [
+        "--stream-type", "bronze",
+        "--master", "spark://spark-master:7077",
+        "--starting-offsets", "earliest"
+      ]
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+          cpus: '1.5'
+
+  silver-stream:
+    image: thread-protection-streaming:latest
+    container_name: silver-stream
+    depends_on:
+      - bronze-stream
+    environment:
+      - DELTA_BASE_PATH=/data/delta
+      - CHECKPOINT_BASE_PATH=/data/checkpoints
+      - SPARK_MASTER=spark://spark-master:7077
+    volumes:
+      - ./../../data:/data
+      - ./../../services/streaming/src:/app/services/streaming/src
+    networks:
+      - pipeline-network
+    command:
+      [
+        "--stream-type", "silver",
+        "--master", "spark://spark-master:7077"
+      ]
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1.5g
+          cpus: '1'
+
+  gold-stream:
+    image: thread-protection-streaming:latest
+    container_name: gold-stream
+    depends_on:
+      - silver-stream
+    environment:
+      - DELTA_BASE_PATH=/data/delta
+      - CHECKPOINT_BASE_PATH=/data/checkpoints
+      - SPARK_MASTER=spark://spark-master:7077
+    volumes:
+      - ./../../data:/data
+      - ./../../services/streaming/src:/app/services/streaming/src
+    networks:
+      - pipeline-network
+    command:
+      [
+        "--stream-type", "gold",
+        "--master", "spark://spark-master:7077"
+      ]
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+          cpus: '1'
 
   # ============ Query Engine ============
+  postgres-metastore:
+    image: postgres:15
+    container_name: postgres-metastore
+    environment:
+      POSTGRES_USER: hive
+      POSTGRES_PASSWORD: hive
+      POSTGRES_DB: metastore
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres-metastore-data:/var/lib/postgresql/data
+    networks:
+      - pipeline-network
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "hive"]
+      interval: 5s
+      retries: 5
+
+  hive-metastore:
+    image: apache/hive:3.1.3
+    container_name: hive-metastore
+    platform: linux/amd64
+    user: root
+    depends_on:
+      postgres-metastore:
+        condition: service_healthy
+    ports:
+      - "9083:9083"
+    volumes:
+      - ./../../data:/data
+      - ./configs/hive/init-metastore.sh:/opt/hive/init-metastore.sh
+    environment:
+      DB_DRIVER: postgres
+      SERVICE_NAME: metastore
+    entrypoint: ["/bin/bash"]
+    command: ["/opt/hive/init-metastore.sh"]
+    networks:
+      - pipeline-network
+
   trino:
     image: trinodb/trino:428
     container_name: trino
@@ -92,9 +230,11 @@ services:
       - "8081:8080"  # Trino Web UI
     volumes:
       - ./configs/trino/catalog:/etc/trino/catalog
+      - ./../../data:/data
     networks:
       - pipeline-network
     depends_on:
+      - hive-metastore
       - kafka
 
   # ============ Workflow Orchestration ============
@@ -128,6 +268,8 @@ services:
       - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=True
       - AIRFLOW__CORE__LOAD_EXAMPLES=False
       - AIRFLOW__API__AUTH_BACKENDS=airflow.api.auth.backend.basic_auth
+      - AIRFLOW_UID=0
+      - AIRFLOW_GID=0
       - _AIRFLOW_DB_UPGRADE=True
       - _AIRFLOW_WWW_USER_CREATE=True
       - _AIRFLOW_WWW_USER_USERNAME=admin
@@ -136,6 +278,9 @@ services:
       - ./../../services/orchestration/dags:/opt/airflow/dags
       - ./../../services/orchestration/plugins:/opt/airflow/plugins
       - ./../../services/orchestration/requirements-airflow.txt:/requirements.txt
+      - ./../../services/ingestion:/opt/ingestion
+      - ./../../packages/common/src:/opt/packages/common
+      - ./../../packages/schemas/src:/opt/packages/schemas
       - airflow-logs:/opt/airflow/logs
     entrypoint: /bin/bash
     command:
@@ -167,6 +312,9 @@ services:
       - ./../../services/orchestration/dags:/opt/airflow/dags
       - ./../../services/orchestration/plugins:/opt/airflow/plugins
       - ./../../services/orchestration/requirements-airflow.txt:/requirements.txt
+      - ./../../services/ingestion:/opt/ingestion
+      - ./../../packages/common/src:/opt/packages/common
+      - ./../../packages/schemas/src:/opt/packages/schemas
       - airflow-logs:/opt/airflow/logs
       - /var/run/docker.sock:/var/run/docker.sock
     entrypoint: /bin/bash
@@ -175,7 +323,7 @@ services:
       - |
         apt-get update && apt-get install -y docker.io sudo || true
         chmod 666 /var/run/docker.sock 2>/dev/null || true
-        pip install --user --no-cache-dir -r /requirements.txt
+        pip install --no-cache-dir -r /requirements.txt
         airflow webserver
     networks:
       - pipeline-network
@@ -199,19 +347,25 @@ services:
       - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=True
       - AIRFLOW__CORE__LOAD_EXAMPLES=False
       - DOCKER_HOST=unix:///var/run/docker.sock
+      - AIRFLOW_UID=0
+      - AIRFLOW_GID=0
     volumes:
       - ./../../services/orchestration/dags:/opt/airflow/dags
       - ./../../services/orchestration/plugins:/opt/airflow/plugins
       - ./../../services/orchestration/requirements-airflow.txt:/requirements.txt
+      - ./../../services/ingestion:/opt/ingestion
+      - ./../../packages/common/src:/opt/packages/common
+      - ./../../packages/schemas/src:/opt/packages/schemas
       - airflow-logs:/opt/airflow/logs
       - /var/run/docker.sock:/var/run/docker.sock
     entrypoint: /bin/bash
     command:
       - -c
       - |
-        sudo apt-get update && sudo apt-get install -y docker.io || true
-        sudo usermod -aG docker airflow || true
-        pip install --user --no-cache-dir -r /requirements.txt
+        apt-get update && apt-get install -y docker.io sudo || true
+        usermod -aG docker airflow || true
+        chmod 666 /var/run/docker.sock 2>/dev/null || true
+        pip install --no-cache-dir -r /requirements.txt
         airflow scheduler
     networks:
       - pipeline-network
@@ -255,6 +409,7 @@ services:
 networks:
   pipeline-network:
     driver: bridge
+    name: pipeline-network
 
 volumes:
   zookeeper-data:
@@ -264,3 +419,4 @@ volumes:
   airflow-logs:
   prometheus-data:
   grafana-data:
+  postgres-metastore-data:

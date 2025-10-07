@@ -8,7 +8,7 @@ echo "🔧 Setting up Airflow Variables..."
 
 # Wait for Airflow to be ready
 echo "⏳ Waiting for Airflow webserver to be ready..."
-sleep 5
+sleep 30
 
 # Set Kafka configuration
 echo "📡 Setting Kafka configuration..."

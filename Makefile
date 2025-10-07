@@ -97,9 +97,17 @@ clean-data: ## Clean data directories (checkpoints, Delta tables)
 	rm -f derby.log
 
 # Docker
-start: ## Start all services with Docker Compose
+start: ## Start all services with Docker Compose (including streaming jobs)
+	@echo "Building ingestion service image..."
+	@docker build -f services/ingestion/Dockerfile -t thread-protection-ingestion:latest . >/dev/null && echo "Ingestion image build completed"
+	@echo "Building streaming service image..."
+	@docker build -f services/streaming/Dockerfile -t thread-protection-streaming:latest . >/dev/null && echo "Streaming image build completed"
 	@echo "Starting services..."
 	cd infrastructure/docker && docker-compose up -d
+	@echo "Configuring Airflow variables..."
+	@scripts/setup-airflow-vars.sh
+	@echo ""
+	@echo "All services started including Bronze, Silver, and Gold streaming jobs"
 
 stop: ## Stop all services
 	@echo "Stopping services..."

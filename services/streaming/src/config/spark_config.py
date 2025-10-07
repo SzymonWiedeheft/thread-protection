@@ -2,6 +2,7 @@
 
 from typing import Dict, Optional
 from pyspark.sql import SparkSession
+from delta import configure_spark_with_delta_pip
 import structlog
 
 logger = structlog.get_logger()
@@ -14,20 +15,31 @@ SPARK_CONF = {
     "spark.sql.catalog.spark_catalog": "org.apache.spark.sql.delta.catalog.DeltaCatalog",
     # Streaming configuration
     "spark.sql.streaming.schemaInference": "true",
-    "spark.sql.streaming.checkpointFileManagerClass": "org.apache.spark.sql.execution.streaming.CheckpointFileManager",
     # Performance tuning
-    "spark.sql.shuffle.partitions": "100",
+    "spark.sql.shuffle.partitions": "16",
     "spark.sql.adaptive.enabled": "true",
     "spark.sql.adaptive.coalescePartitions.enabled": "true",
+    "spark.default.parallelism": "2",
     # Delta optimizations
     "spark.databricks.delta.optimizeWrite.enabled": "true",
     "spark.databricks.delta.autoCompact.enabled": "true",
     "spark.databricks.delta.properties.defaults.autoOptimize.optimizeWrite": "true",
     "spark.databricks.delta.properties.defaults.autoOptimize.autoCompact": "true",
-    # Memory configuration
-    "spark.driver.memory": "2g",
-    "spark.executor.memory": "2g",
-    "spark.driver.maxResultSize": "1g",
+    # Memory configuration (defaults - can be overridden per stream)
+    "spark.driver.memory": "512m",
+    "spark.executor.memory": "768m",
+    "spark.executor.cores": "1",
+    "spark.cores.max": "1",  # Limit max cores per application
+    "spark.driver.maxResultSize": "512m",
+    # Dynamic resource allocation
+    "spark.dynamicAllocation.enabled": "true",
+    "spark.dynamicAllocation.shuffleTracking.enabled": "true",
+    "spark.dynamicAllocation.minExecutors": "0",
+    "spark.dynamicAllocation.maxExecutors": "2",
+    "spark.dynamicAllocation.initialExecutors": "1",
+    "spark.dynamicAllocation.executorIdleTimeout": "60s",
+    # Fair Scheduler for resource sharing
+    "spark.scheduler.mode": "FAIR",
     # Serialization
     "spark.serializer": "org.apache.spark.serializer.KryoSerializer",
     # Logging
@@ -75,9 +87,33 @@ TRIGGER_INTERVALS = {
 }
 
 
+# Resource profiles per stream type
+# Bronze handles raw ingestion (heaviest load)
+# Silver does transformations (medium load)
+# Gold does aggregations (lightest load)
+STREAM_RESOURCE_PROFILES = {
+    "bronze": {
+        "spark.driver.memory": "512m",
+        "spark.executor.memory": "1g",
+        "spark.cores.max": "1",
+    },
+    "silver": {
+        "spark.driver.memory": "512m",
+        "spark.executor.memory": "768m",
+        "spark.cores.max": "1",
+    },
+    "gold": {
+        "spark.driver.memory": "512m",
+        "spark.executor.memory": "512m",
+        "spark.cores.max": "1",
+    },
+}
+
+
 def create_spark_session(
     app_name: str = "DomainStreamingPipeline",
     master: Optional[str] = None,
+    stream_type: Optional[str] = None,
     additional_conf: Optional[Dict[str, str]] = None,
 ) -> SparkSession:
     """
@@ -86,17 +122,18 @@ def create_spark_session(
     Args:
         app_name: Application name
         master: Spark master URL (e.g., "local[*]", "spark://host:7077")
+        stream_type: Stream type (bronze, silver, gold) for resource profile
         additional_conf: Additional Spark configuration
 
     Returns:
         Configured SparkSession
 
     Examples:
-        >>> spark = create_spark_session("BronzeStream")
+        >>> spark = create_spark_session("BronzeStream", stream_type="bronze")
         >>> spark.version
         '3.5.0'
     """
-    logger.info("Creating Spark session", app_name=app_name, master=master)
+    logger.info("Creating Spark session", app_name=app_name, master=master, stream_type=stream_type)
 
     builder = SparkSession.builder.appName(app_name)
 
@@ -107,12 +144,23 @@ def create_spark_session(
     for key, value in SPARK_CONF.items():
         builder = builder.config(key, value)
 
-    # Apply additional configuration
+    # Apply stream-specific resource profile if provided
+    if stream_type and stream_type.lower() in STREAM_RESOURCE_PROFILES:
+        logger.info(f"Applying {stream_type} resource profile")
+        for key, value in STREAM_RESOURCE_PROFILES[stream_type.lower()].items():
+            builder = builder.config(key, value)
+
+    # Apply additional configuration (overrides everything)
     if additional_conf:
         for key, value in additional_conf.items():
             builder = builder.config(key, value)
 
-    spark = builder.getOrCreate()
+    extra_packages = [
+        "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.6",
+        "org.apache.spark:spark-token-provider-kafka-0-10_2.12:3.5.6",
+    ]
+
+    spark = configure_spark_with_delta_pip(builder, extra_packages=extra_packages).getOrCreate()
 
     # Set log level
     spark.sparkContext.setLogLevel("WARN")

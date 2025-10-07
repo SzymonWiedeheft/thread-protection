@@ -41,7 +41,7 @@ def create_delta_table_if_not_exists(
         empty_df = spark.createDataFrame([], schema)
 
         # Build writer
-        writer = empty_df.write.format("delta")
+        writer = empty_df.write.format("delta").mode("overwrite")
 
         if partition_columns:
             writer = writer.partitionBy(*partition_columns)
@@ -57,6 +57,18 @@ def create_delta_table_if_not_exists(
             table_path=table_path,
             partitions=partition_columns,
         )
+
+        # Verify table is readable by executors (forces file system sync)
+        # This prevents race conditions in distributed environments
+        try:
+            verify_df = spark.read.format("delta").load(table_path)
+            verify_df.count()  # Force executor interaction
+            logger.info("Delta table verified and readable by executors")
+        except Exception as e:
+            logger.warning(
+                "Delta table verification read returned error (may be transient)",
+                error=str(e)
+            )
     else:
         logger.info("Delta table already exists", table_path=table_path)
 

@@ -1,24 +1,36 @@
 # Ingestion Service Dockerfile
 
+FROM python:3.11-slim AS wheels-builder
+
+WORKDIR /build
+
+# Prepare build tooling
+RUN apt-get update && apt-get install -y \
+    gcc \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+RUN python -m pip install --upgrade pip setuptools wheel
+
+# Build wheels for shared libraries
+COPY packages/common /build/packages/common
+COPY packages/schemas /build/packages/schemas
+RUN pip wheel /build/packages/common -w /dist
+RUN pip wheel /build/packages/schemas -w /dist
+
 FROM python:3.11-slim
 
-# Set working directory
 WORKDIR /app
 
-# Install system dependencies
+# Runtime dependencies
 RUN apt-get update && apt-get install -y \
     gcc \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy shared packages first
-COPY packages/common /app/packages/common
-COPY packages/schemas /app/packages/schemas
+# Install shared libraries from wheels
+COPY --from=wheels-builder /dist /wheels
+RUN pip install --no-cache-dir /wheels/common-*.whl /wheels/schemas-*.whl
 
-# Install shared packages
-RUN pip install --no-cache-dir -e /app/packages/common
-RUN pip install --no-cache-dir -e /app/packages/schemas
-
-# Copy service files
+# Copy service source
 COPY services/ingestion/pyproject.toml /app/
 COPY services/ingestion/src /app/src
 
@@ -28,7 +40,11 @@ RUN pip install --no-cache-dir \
     kafka-python==2.0.2 \
     pyyaml==6.0 \
     pydantic==2.5.0 \
-    pydantic-settings==2.1.0
+    pydantic-settings==2.1.0 \
+    tenacity==8.2.0
+
+# Ensure src is importable when running python -m src.main
+ENV PYTHONPATH=/app/src:/app
 
 # Create non-root user
 RUN useradd -m -u 1000 appuser && \
@@ -36,10 +52,9 @@ RUN useradd -m -u 1000 appuser && \
 
 USER appuser
 
-# Set environment variables
+# Default environment variables
 ENV PYTHONUNBUFFERED=1 \
     KAFKA_BOOTSTRAP_SERVERS=kafka:9092 \
     LOG_LEVEL=INFO
 
-# Run the service
 CMD ["python", "-m", "src.main"]
